@@ -45,6 +45,11 @@ class CloudSettings(context: Context, val profileId: String = AccountStore.activ
         get() = prefs.getStringSet("session_pins:${baseUrl}:${accountHint}", emptySet()).orEmpty().toSet()
         set(value) = prefs.edit().putStringSet("session_pins:${baseUrl}:${accountHint}", value).apply()
 
+    /** Keep explicit stops across process restarts, scoped to the current account and site. */
+    var stoppedSessions: Set<String>
+        get() = prefs.getStringSet("session_stops:${baseUrl}:${accountHint}", emptySet()).orEmpty().toSet()
+        set(value) = prefs.edit().putStringSet("session_stops:${baseUrl}:${accountHint}", value.toSet()).apply()
+
     /** 当前选用的模型 ID（空表示用云端默认）。 */
     var selectedModel: String
         get() = prefs.getString(KEY_MODEL, "").orEmpty()

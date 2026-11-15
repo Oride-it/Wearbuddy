@@ -4,6 +4,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 
 /** 界面文案（中文 / English）。 */
 interface LocalizedStrings {
+    val copyTextLabel: String
+    val copiedText: String
+    val previewHtml: String
     val appName: String
     // 三页
     val tabTasks: String
@@ -136,6 +139,9 @@ interface LocalizedStrings {
 }
 
 private object ZhStrings : LocalizedStrings {
+    override val copyTextLabel = "复制文字"
+    override val copiedText = "已复制"
+    override val previewHtml = "网页预览"
     override val appName = "Wearbuddy"
     override val tabTasks = "任务"
     override val tabProjects = "项目"
@@ -263,6 +269,9 @@ private object ZhStrings : LocalizedStrings {
 }
 
 private object EnStrings : LocalizedStrings {
+    override val copyTextLabel = "Copy text"
+    override val copiedText = "Copied"
+    override val previewHtml = "Preview HTML"
     override val appName = "Wearbuddy"
     override val tabTasks = "Tasks"
     override val tabProjects = "Projects"

@@ -17,6 +17,7 @@ class FilePickerTest {
         file.parentFile!!.mkdirs()
         file.writeText("file-picker-content")
         try {
+            compose.waitUntil(5000) { compose.onAllNodesWithText("artifacts").fetchSemanticsNodes().isNotEmpty() }
             compose.onNode(hasScrollAction()).performScrollToNode(hasText("artifacts"))
             compose.onNodeWithText("artifacts").performClick()
             compose.waitForIdle()

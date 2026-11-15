@@ -1,5 +1,8 @@
 package com.wear.wearbuddy.presentation
 
+import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import android.app.Application
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.*
@@ -38,11 +41,23 @@ class UpdateAndSettingsTest {
     }
     @Test fun updateDialogShowsReleaseNotesAndDownloadProgress() {
         val release = AppRelease("1.0.10", "修复连接\n新增文件选择\n更新账号管理", "https://example.invalid", 100, "a".repeat(64))
+        var downloaded by mutableLongStateOf(42)
         compose.setContent { WearbuddyTheme { AppScaffold {
-            UpdatePrompt(UpdateState(visible = true, release = release, downloading = true, bytes = 42), {}, {})
+            UpdatePrompt(UpdateState(visible = true, release = release, downloading = true, bytes = downloaded), {}, {})
         } } }
         compose.onNodeWithText("新版本 1.0.10").assertExists()
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("正在下载 42%"))
         compose.onNodeWithText("正在下载 42%").assertExists()
+        val bar = compose.onNodeWithTag("download-progress")
+        bar.assertRangeInfoEquals(ProgressBarRangeInfo(.42f, 0f..1f))
+        val before = bar.captureToImage().toPixelMap()
+        val track = before[before.width / 2, before.height / 2]
+        assertEquals(track, before[before.width - 4, before.height / 2])
+        compose.runOnIdle { downloaded = 80 }
+        compose.waitForIdle()
+        bar.assertRangeInfoEquals(ProgressBarRangeInfo(.8f, 0f..1f))
+        val after = bar.captureToImage().toPixelMap()
+        assertNotEquals(track, after[after.width / 2, after.height / 2])
+        compose.onNodeWithText("正在下载 80%").assertExists()
     }
 }

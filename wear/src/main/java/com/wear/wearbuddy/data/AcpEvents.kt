@@ -130,25 +130,13 @@ internal class AcpEvents(private val sessionId: String, private val conversation
             val state = meta?.optString("codebuddy.ai/status")?.takeIf { it.isNotBlank() }
                 ?: cb?.optString("status")
             if (!history && meta?.optBoolean("codebuddy.ai/isSnapshot") != true && cb?.optBoolean("isSnapshot") != true) {
-                status = when (state) {
-                    "working", "planning", "pending" -> TaskStatus.WORKING
-                    "completed" -> TaskStatus.DONE
-                    "failed", "error" -> TaskStatus.FAILED
-                    else -> status
-                }
+                status = state?.let(TaskStates::parse) ?: status
             }
             if (state == "completed") boundary = true
             return true
         }
         if (kind == "state_update") {
-            if (!history) status = when (update.optString("currentState")) {
-                "completed" -> TaskStatus.DONE
-                "cancelled" -> TaskStatus.STOPPED
-                "failed", "error" -> TaskStatus.FAILED
-                "working", "thinking", "planning", "executing" -> TaskStatus.WORKING
-                "waiting_for_user", "waiting_for_permission" -> TaskStatus.BLOCKED
-                else -> status
-            }
+            if (!history) status = TaskStates.parse(update.optString("currentState")) ?: status
             boundary = true
             return true
         }

@@ -12,7 +12,10 @@ import kotlinx.coroutines.flow.*
 
 internal data class UpdateState(val visible: Boolean = false, val checking: Boolean = false,
     val release: AppRelease? = null, val downloading: Boolean = false, val bytes: Long = 0,
-    val file: File? = null, val error: String? = null)
+    val file: File? = null, val error: String? = null) {
+    val downloadFraction: Float get() = if (file != null) 1f else
+        (bytes.toDouble() / (release?.size ?: 0).coerceAtLeast(1)).toFloat().coerceIn(0f, 1f)
+}
 
 class UpdateViewModel(app: Application): AndroidViewModel(app) {
     private val mutable = MutableStateFlow(UpdateState())

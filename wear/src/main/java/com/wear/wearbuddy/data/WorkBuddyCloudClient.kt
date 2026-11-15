@@ -1106,15 +1106,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         val id = o.optString("id").ifBlank { o.optString("conversationId") }
         if (id.isBlank()) return null
         val session = o.optJSONObject("session")
-        val status = sequenceOf(
-            (o.opt("sessionStatus") as? String).orEmpty(),
-            session?.optString("sessionStatus").orEmpty(),
-            session?.optString("status").orEmpty(),
-            session?.optString("state").orEmpty(),
-            o.optJSONObject("status")?.optString("status").orEmpty(),
-            (o.opt("status") as? String).orEmpty(),
-            (o.opt("lifecycle") as? String).orEmpty()
-        ).firstOrNull { it.isNotBlank() }.orEmpty().uppercase()
+        val status = TaskStates.remoteStatus(o)
         return RemoteConversation(
             id = id,
             title = o.optString("name").takeIf { it.isNotBlank() }

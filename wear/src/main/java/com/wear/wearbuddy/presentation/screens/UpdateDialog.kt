@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -82,8 +83,8 @@ internal fun UpdatePrompt(state: com.wear.wearbuddy.vm.UpdateState, onConfirm: (
             if (state.downloading || state.checking || state.file != null) item {
                 Column(Modifier.fillMaxWidth()) {
                     if (state.checking) CircularProgressIndicator()
-                    else LinearProgressIndicator(progress = { if (state.file != null) 1f else state.bytes.toFloat() / (state.release?.size ?: 1) }, modifier = Modifier.fillMaxWidth())
-                    if (state.downloading) Text("正在下载 ${(100L * state.bytes / (state.release?.size ?: 1)).coerceIn(0, 100)}%")
+                    else DownloadProgressBar(state.downloadFraction, Modifier.fillMaxWidth().testTag("download-progress"))
+                    if (state.downloading) Text("正在下载 ${(state.downloadFraction * 100).toInt()}%")
                 }
             }
             if (state.file != null) item { Text("下载完成") }

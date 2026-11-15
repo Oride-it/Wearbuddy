@@ -431,7 +431,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 if (taskId != null) sourceRepo.markDownloaded(taskId, artifact.uri, file.absolutePath)
                 val extension = name.substringAfterLast('.', "").lowercase()
                 val text = if (artifact.mimeType?.startsWith("text/") == true || extension in setOf(
-                    "txt", "md", "csv", "tsv", "json", "xml", "html", "log", "yaml", "yml", "kt", "py", "js", "css"
+                    "txt", "md", "csv", "tsv", "json", "xml", "html", "htm", "log", "yaml", "yml", "kt", "py", "js", "css"
                 )) bytes.toString(Charsets.UTF_8) else null
                 ArtifactPreview(loading = false, text = text, localPath = file.absolutePath)
             } }

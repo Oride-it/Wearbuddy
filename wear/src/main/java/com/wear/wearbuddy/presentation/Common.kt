@@ -1,6 +1,7 @@
 package com.wear.wearbuddy.presentation
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,25 @@ import com.wear.wearbuddy.data.TaskStatus
 
 /** 触感反馈开关（由设置驱动）。 */
 val LocalHapticsEnabled = staticCompositionLocalOf { true }
+
+/** Long press copies the complete text, including content hidden by ellipsis. */
+@Composable
+fun rememberCopyText(): (String) -> Unit {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val strings = LocalStrings.current
+    return remember(context, strings) { { text: String ->
+        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText(strings.copyTextLabel, text))
+        android.widget.Toast.makeText(context, strings.copiedText, android.widget.Toast.LENGTH_SHORT).show()
+    } }
+}
+
+@Composable
+fun Modifier.copyOnLongPress(text: String): Modifier {
+    val copy = rememberCopyText()
+    return this.then(Modifier.combinedClickable(onClick = {}, onLongClickLabel = LocalStrings.current.copyTextLabel,
+        onLongClick = { copy(text) }))
+}
 
 /** 主操作点击时的一次触感反馈。 */
 @Composable
@@ -127,6 +147,7 @@ fun SectionCard(
     transformation: SurfaceTransformation? = null,
     shape: androidx.compose.ui.graphics.Shape = androidx.wear.compose.material3.CardDefaults.shape,
     onClick: () -> Unit = {},
+    titleColor: Color = MaterialTheme.colorScheme.primary,
     content: @Composable () -> Unit
 ) {
     Card(
@@ -140,7 +161,7 @@ fun SectionCard(
         Text(
             title,
             style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
+            color = titleColor,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1
         )
@@ -283,10 +304,13 @@ fun MessageBubble(
     modifier: Modifier = Modifier,
     transformation: SurfaceTransformation? = null
 ) {
+    val copy = rememberCopyText()
     when (message.role) {
         ChatRole.THOUGHT, ChatRole.TOOL -> {
             Card(
                 onClick = {},
+                onLongClick = { copy(message.text) },
+                onLongClickLabel = LocalStrings.current.copyTextLabel,
                 modifier = modifier.fillMaxWidth(),
                 transformation = transformation,
                 colors = CardDefaults.cardColors(
@@ -314,6 +338,8 @@ fun MessageBubble(
         else -> {
             Card(
                 onClick = {},
+                onLongClick = { copy(message.text) },
+                onLongClickLabel = LocalStrings.current.copyTextLabel,
                 modifier = modifier.fillMaxWidth(),
                 transformation = transformation,
                 colors = CardDefaults.cardColors(

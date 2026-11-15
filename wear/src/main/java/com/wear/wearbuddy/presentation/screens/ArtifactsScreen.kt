@@ -33,6 +33,11 @@ import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import com.wear.wearbuddy.presentation.copyOnLongPress
+import com.wear.wearbuddy.presentation.isHtml
+import com.wear.wearbuddy.presentation.openHtmlPreview
 import com.wear.wearbuddy.data.Artifact
 import com.wear.wearbuddy.presentation.EmptyHint
 import com.wear.wearbuddy.presentation.LocalStrings
@@ -98,7 +103,7 @@ fun ArtifactsScreen(actions: AppViewModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ArtifactRow(
+internal fun ArtifactRow(
     actions: AppViewModel,
     taskId: String,
     file: Artifact,
@@ -107,18 +112,32 @@ private fun ArtifactRow(
 ) {
     val s = LocalStrings.current
     val haptic = rememberClickHaptic()
-    var expanded by remember(file.uri) { mutableStateOf(false) }
+    var expanded by remember(taskId, file.uri) { mutableStateOf(false) }
+    val context = LocalContext.current
+    val copy = com.wear.wearbuddy.presentation.rememberCopyText()
+    var launchHtml by remember(taskId, file.uri) { mutableStateOf(false) }
+    LaunchedEffect(launchHtml, preview?.localPath) {
+        if (launchHtml && preview?.localPath != null) {
+            launchHtml = false
+            openHtmlPreview(context, file, preview.localPath)
+        }
+    }
 
     Card(
         onClick = {
             haptic()
-            if (preview?.error != null) {
+            if (file.isHtml()) {
+                launchHtml = true
+                actions.loadArtifactPreview(file, taskId)
+            } else if (preview?.error != null) {
                 actions.loadArtifactPreview(file, taskId)
             } else {
                 expanded = !expanded
                 if (expanded) actions.loadArtifactPreview(file, taskId)
             }
         },
+        onLongClick = { copy(file.name) },
+        onLongClickLabel = s.copyTextLabel,
         modifier = modifier,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -145,7 +164,7 @@ private fun ArtifactRow(
                         preview?.loading == true -> s.loading
                         preview?.error != null -> "${preview.error} · ${s.artifactTapToRetry}"
                         preview?.localPath != null -> s.artifactSaved
-                        else -> s.artifactTapToView
+                        else -> if (file.isHtml()) s.previewHtml else s.artifactTapToView
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = if (preview?.error != null) MaterialTheme.colorScheme.error
@@ -157,7 +176,7 @@ private fun ArtifactRow(
         }
         if (expanded && preview?.text != null) {
             Spacer(Modifier.size(6.dp))
-            Text(preview.text, style = MaterialTheme.typography.bodySmall)
+            Text(preview.text, style = MaterialTheme.typography.bodySmall, modifier = Modifier.copyOnLongPress(preview.text))
         }
         if (expanded && preview?.localPath != null && preview.text == null) {
             ArtifactImage(preview.localPath, file.name)

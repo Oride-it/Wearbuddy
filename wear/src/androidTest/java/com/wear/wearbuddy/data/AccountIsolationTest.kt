@@ -16,6 +16,9 @@ class AccountIsolationTest {
         try {
             first.cookies.absorb(mapOf("Set-Cookie" to listOf("session=account-A; Path=/")), "https://www.workbuddy.cn/")
             first.saveSession("13800000001", "First")
+            first.stoppedSessions = setOf("stopped-task")
+            assertEquals(setOf("stopped-task"), CloudSettings(context, first.profileId).stoppedSessions)
+            assertTrue(second.stoppedSessions.isEmpty())
             store.activate(first)
             assertEquals(first.profileId, CloudSettings(context).profileId)
             // A second account has its own empty login jar before it is activated.

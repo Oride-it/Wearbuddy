@@ -37,10 +37,8 @@ import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
-import androidx.wear.compose.material3.SurfaceTransformation
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TitleCard
-import com.wear.wearbuddy.data.ChatRole
 import com.wear.wearbuddy.data.TaskStatus
 import com.wear.wearbuddy.presentation.InputBar
 import com.wear.wearbuddy.presentation.LocalStrings
@@ -50,15 +48,6 @@ import com.wear.wearbuddy.presentation.statusLabelOf
 import com.wear.wearbuddy.vm.AppViewModel
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.asImageBitmap
-import android.graphics.BitmapFactory
-import androidx.compose.runtime.produceState
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /**
  * 任务详情（覆盖页）：状态头（思考中转圈）、完整对话消息（含「思考」过程）、
@@ -74,6 +63,7 @@ fun TaskDetailScreen(
     val task = state.activeTask ?: return
     val listState = rememberTransformingLazyColumnState()
     val haptic = rememberClickHaptic()
+    val copy = com.wear.wearbuddy.presentation.rememberCopyText()
 
     val voiceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -117,6 +107,8 @@ fun TaskDetailScreen(
                     item {
                         TitleCard(
                             onClick = {},
+                            onLongClick = { copy(task.title) },
+                            onLongClickLabel = s.copyTextLabel,
                             title = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (task.status == TaskStatus.WORKING) {
@@ -268,58 +260,9 @@ fun TaskDetailScreen(
                             ListHeader { Text(s.artifacts) }
                         }
                         items(files, key = { it.uri }) { file ->
-                            var expanded by remember(task.id, file.uri) { mutableStateOf(false) }
-                            val preview = state.artifactPreviews[com.wear.wearbuddy.vm.artifactPreviewKey(task.id, file.uri)]
-                            Card(
-                                onClick = {
-                                    haptic()
-                                    if (preview?.error != null) {
-                                        actions.loadArtifactPreview(file, task.id)
-                                    } else {
-                                        expanded = !expanded
-                                        if (expanded) actions.loadArtifactPreview(file, task.id)
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    ,
-                                transformation = null
-                            ) {
-                                Text(
-                                    file.name,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    when {
-                                        preview?.loading == true -> s.loading
-                                        preview?.error != null -> preview.error
-                                        preview?.localPath != null -> s.artifactSaved
-                                        else -> s.artifactTapToView
-                                    },
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                                if (expanded && preview?.text != null) {
-                                    Text(preview.text, style = MaterialTheme.typography.bodySmall)
-                                }
-                                if (expanded && preview?.localPath != null && preview.text == null) {
-                                    val bitmap by produceState<android.graphics.Bitmap?>(null, preview.localPath) {
-                                        value = withContext(Dispatchers.IO) {
-                                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                                            BitmapFactory.decodeFile(preview.localPath, bounds)
-                                            if (bounds.outWidth > 0 && bounds.outHeight > 0) {
-                                                val options = BitmapFactory.Options()
-                                                while (maxOf(bounds.outWidth, bounds.outHeight) / options.inSampleSize.coerceAtLeast(1) > 640) {
-                                                    options.inSampleSize = options.inSampleSize.coerceAtLeast(1) * 2
-                                                }
-                                                BitmapFactory.decodeFile(preview.localPath, options)
-                                            } else null
-                                        }
-                                    }
-                                    bitmap?.let { Image(it.asImageBitmap(), file.name, Modifier.fillMaxWidth()) }
-                                }
-                            }
+                            ArtifactRow(actions, task.id, file,
+                                state.artifactPreviews[com.wear.wearbuddy.vm.artifactPreviewKey(task.id, file.uri)],
+                                Modifier.fillMaxWidth())
                         }
                     }
 

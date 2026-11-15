@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -183,15 +184,18 @@ fun TasksPage(
 
 /** 任务卡片：标题 + 状态徽标；执行中在左侧显示转圈。 */
 @Composable
-private fun TaskCard(
+internal fun TaskCard(
     task: Task,
-    transformation: SurfaceTransformation?,
+    transformation: SurfaceTransformation? = null,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val copy = com.wear.wearbuddy.presentation.rememberCopyText()
     Card(
         onClick = onClick,
-        modifier = modifier,
+        onLongClick = { copy(task.title) },
+        onLongClickLabel = LocalStrings.current.copyTextLabel,
+        modifier = modifier.heightIn(min = 48.dp),
         transformation = transformation,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer

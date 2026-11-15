@@ -37,7 +37,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
 
     private val serverModels = ConcurrentHashMap<String, String>()
 
-    private val stoppedIds = ConcurrentHashMap.newKeySet<String>()
+    private val stoppedIds = ConcurrentHashMap.newKeySet<String>().apply { addAll(settings.stoppedSessions) }
 
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     override val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
@@ -61,7 +61,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
     init {
         client.onStreamChanged = { id, snapshot ->
             updateTask(id) { task ->
-                val status = snapshot.status?.takeUnless { id in stoppedIds } ?: task.status
+                val status = TaskStates.resolve(null, snapshot.status, id in stoppedIds) ?: task.status
                 task.copy(
                     messages = snapshot.messages,
                     status = status,
@@ -100,7 +100,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
         }
 
     override suspend fun reply(id: String, prompt: String, attachments: List<Artifact>) = withContext(Dispatchers.IO) {
-        stoppedIds.remove(id)
+        setStopped(id, false)
         updateTask(id) { it.copy(status = TaskStatus.WORKING, error = null, ask = null) }
         startPolling(id)
         deliver(id) {
@@ -177,7 +177,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
     private fun forget(id: String) {
         pollers.remove(id)?.cancel()
         sessions.remove(id)
-        stoppedIds.remove(id)
+        setStopped(id, false)
         _tasks.update { list -> list.filterNot { it.id == id } }
     }
 
@@ -187,7 +187,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
 
     override fun stop(id: String) {
         pollers.remove(id)?.cancel()
-        stoppedIds.add(id)
+        setStopped(id, true)
         updateTask(id) { it.copy(status = TaskStatus.STOPPED, unread = false, ask = null) }
         scope.launch {
             repeat(2) { attempt ->
@@ -202,7 +202,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
 
     override suspend fun retry(id: String) = withContext(Dispatchers.IO) {
         val prompt = _tasks.value.firstOrNull { it.id == id }?.title.orEmpty()
-        stoppedIds.remove(id)
+        setStopped(id, false)
         updateTask(id) { it.copy(status = TaskStatus.WORKING, error = null) }
         startPolling(id)
         deliver(id) {
@@ -339,7 +339,6 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
         pollers.remove(id)?.cancel()
         pollers[id] = scope.launch {
             var backoff = INITIAL_POLL_INTERVAL
-            var sawRunning = false
             while (isActive) {
                 if (settings.extremeSaver) {
                     foregroundFlow.first { it }
@@ -356,13 +355,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
                 }
                 val stream = client.streamSnapshot(id)?.takeIf { client.hasLink(id) }
                 val polledStatus = remote.status.toTaskStatusOrNull()
-                val remoteStatus = when {
-                    stream?.status in setOf(TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.STOPPED) -> stream?.status
-                    polledStatus in setOf(TaskStatus.BLOCKED, TaskStatus.FAILED, TaskStatus.STOPPED) -> polledStatus
-                    polledStatus == TaskStatus.DONE && sawRunning -> TaskStatus.DONE
-                    else -> stream?.status ?: polledStatus
-                }
-                if (polledStatus == TaskStatus.WORKING) sawRunning = true
+                val remoteStatus = TaskStates.resolve(polledStatus, stream?.status, id in stoppedIds)
                 if (remoteStatus == TaskStatus.WORKING) remote.session?.let { sessions[id] = it }
                 updateTask(id) { t ->
                     val status = remoteStatus?.takeUnless {
@@ -431,7 +424,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
             val keepStopped = (l.status == TaskStatus.STOPPED || stoppedIds.contains(r.id)) &&
                 r.status == TaskStatus.WORKING
             r.copy(
-                status = if (keepStopped) TaskStatus.STOPPED else r.status,
+                status = TaskStates.resolve(r.status, client.streamSnapshot(r.id)?.status, keepStopped) ?: r.status,
                 result = r.result ?: l.result,
                 messages = l.messages,
                 unread = if (keepStopped) false else r.unread
@@ -441,7 +434,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
     }
 
     private fun WorkBuddyCloudClient.RemoteConversation.toTask(env: ExecEnv): Task {
-        val status = this.status.toTaskStatusOrNull() ?: TaskStatus.DONE
+        val status = TaskStates.resolve(this.status.toTaskStatusOrNull() ?: TaskStatus.DONE, null, id in stoppedIds)!!
         return Task(
             id = id,
             title = title ?: "云端任务",
@@ -455,15 +448,11 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
         )
     }
 
-    private fun String.toTaskStatusOrNull(): TaskStatus? = when (uppercase()) {
-        "" -> null
-        "RUNNING", "PENDING", "IN_PROGRESS", "PROCESSING", "WORKING", "BUSY", "GENERATING",
-        "ACTIVE", "QUEUED", "STARTED", "PLANNING" -> TaskStatus.WORKING
-        "COMPLETED", "COMPLETE", "SUCCESS", "DONE", "FINISHED", "IDLE", "ARCHIVED" -> TaskStatus.DONE
-        "WAITING_USER_INPUT", "WAITING_INPUT", "REQUIRES_ACTION", "PAUSED", "BLOCKED" -> TaskStatus.BLOCKED
-        "CANCELLED", "CANCELED", "STOPPED", "ABORTED", "TERMINATED" -> TaskStatus.STOPPED
-        "EXPIRED", "FAILED", "ERROR" -> TaskStatus.FAILED
-        else -> null
+    private fun String.toTaskStatusOrNull(): TaskStatus? = TaskStates.parse(this)
+
+    @Synchronized private fun setStopped(id: String, stopped: Boolean) {
+        if (stopped) stoppedIds.add(id) else stoppedIds.remove(id)
+        settings.stoppedSessions = stoppedIds.toSet()
     }
 
     private companion object {

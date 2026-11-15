@@ -53,7 +53,7 @@ fun AboutScreen(modifier: Modifier = Modifier) {
             contentPadding = padding + PaddingValues(
                 start = 14.dp,
                 end = 14.dp,
-                top = 34.dp,
+                top = 28.dp,
                 bottom = 40.dp
             )
         ) {
@@ -112,15 +112,16 @@ fun AboutScreen(modifier: Modifier = Modifier) {
                 )
             }
             item {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
             }
             // 应用介绍方框
             item {
                 SectionCard(
                     title = s.appIntroTitle,
+                    titleColor = androidx.compose.ui.graphics.Color.White,
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
                     transformation = null,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp)
                 ) {
                     Text(
                         s.appIntro,
