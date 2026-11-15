@@ -18,7 +18,7 @@
 
 ## 构建
 
-需要 JDK 25、Android SDK 37 和 Android SDK Build Tools 36.0.0。
+需要 JDK 25、Android SDK 37.0（sdkmanager 包名 `platforms;android-37.0`）和 Android SDK Build Tools 36.0.0。
 
 ```sh
 ./gradlew :wear:testDebugUnitTest :wear:assembleDebug
