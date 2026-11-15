@@ -2,6 +2,13 @@ name: Signed release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build and verify'
+        required: true
+        default: 'v1.0.9'
+        type: string
 permissions:
   contents: write
 concurrency:
@@ -10,8 +17,12 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -37,14 +48,26 @@ jobs:
       - name: Verify and prepare assets
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose wear/build/outputs/apk/release/wear-release.apk
-          python scripts/prepare_release.py --tag "$GITHUB_REF_NAME"
+          python scripts/prepare_release.py --tag "$RELEASE_TAG"
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "Wearbuddy $GITHUB_REF_NAME" --notes-file "docs/releases/${GITHUB_REF_NAME#v}.md"
-          gh release upload "$GITHUB_REF_NAME" "dist/Wearbuddy-$GITHUB_REF_NAME-release.apk" dist/SHA256SUMS
-          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          if gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' > "$RUNNER_TEMP/release-draft.txt"; then
+            if grep -qx false "$RUNNER_TEMP/release-draft.txt"; then
+              echo "Release already published; signed build verified without replacing public assets."
+              exit 0
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Wearbuddy $RELEASE_TAG" --notes-file "docs/releases/${RELEASE_TAG#v}.md"
+          fi
+          gh release upload "$RELEASE_TAG" "dist/Wearbuddy-$RELEASE_TAG-release.apk" dist/SHA256SUMS --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-release-${{ env.RELEASE_TAG }}
+          path: dist/
+          retention-days: 30
       - name: Remove runner signing material
         if: always()
         run: rm -f keystore/wearbuddy-release.jks

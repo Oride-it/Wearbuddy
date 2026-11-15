@@ -35,7 +35,7 @@
 
 ## 后续发布
 
-维护者可以在本机运行 `scripts/publish-release.ps1`，或在 GitHub 配置以下 Actions Secrets，更新版本号及
+维护者可以在本机登录 GitHub CLI 后运行 `scripts/publish-release.ps1 -Tag v版本号`。也可通过 GitHub Actions 自动构建：配置以下加密 Secrets，更新版本号及
 `docs/releases/版本号.md`，然后推送相应的 `v版本号` 标签：
 
 - `ANDROID_KEYSTORE_BASE64`：原正式版 JKS 文件的 Base64。
@@ -52,3 +52,6 @@
 ## 许可证
 
 MIT，见 LICENSE。
+
+官方仓库已配置加密签名 Secrets。推送版本标签会自动构建发布；已发布版本不会被重复运行覆盖。
+也可在 Actions 的 Signed release 中选择 Run workflow 并输入已有标签，仅验证已有正式发行版。
