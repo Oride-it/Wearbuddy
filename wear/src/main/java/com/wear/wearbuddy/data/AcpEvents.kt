@@ -185,7 +185,7 @@ internal class AcpEvents(private val sessionId: String, private val conversation
         when (node) {
             is JSONObject -> {
                 val uri = node.optString("uri")
-                if (node.optString("type") == "resource_link" && (uri.startsWith("agent://") || uri.startsWith("file:///workspace/"))) {
+                if (node.optString("type") == "resource_link" && (uri.startsWith("agent://") || uri.startsWith("file:///workspace/") || uri.startsWith("file:///root/"))) {
                     files[uri] = artifactOf(node, uri)
                 }
                 node.keys().forEach { collectLinks(node.opt(it)) }

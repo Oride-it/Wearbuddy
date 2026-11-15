@@ -668,28 +668,20 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         java.util.UUID.randomUUID().toString().replace("-", "").take(7)
 
     fun downloadArtifact(artifact: Artifact, conversationId: String? = null): ByteArray {
-        val path = ArtifactKeys.workspacePath(artifact.uri)
-        var sandboxFailure: Throwable? = null
-        if (path != null && conversationId != null) {
-            try {
+        val path = ArtifactKeys.sandboxPath(artifact.uri)
+        if (path != null) {
+            require(!conversationId.isNullOrBlank()) { "读取沙箱产物需要所属会话" }
+            repeat(2) { attempt ->
                 val session = fetchSession(conversationId)
-                val endpoint = session.dataEndpoint?.trimEnd('/')
-                if (!endpoint.isNullOrBlank()) {
-                    val conn = (URL("$endpoint/files?path=${enc(path)}&username=user&cb=${System.currentTimeMillis()}")
-                        .openConnection() as HttpURLConnection).apply {
-                        connectTimeout = CONNECT_TIMEOUT
-                        readTimeout = TRANSFER_TIMEOUT
-                        setRequestProperty("X-Access-Token", session.token)
-                        setRequestProperty("Accept", "*/*")
-                        useCaches = false
-                    }
-                    try {
-                        val status = conn.responseCode
-                        check(status in 200..299) { "沙箱文件读取失败：HTTP $status" }
-                        return conn.inputStream.use { it.readBytes() }
-                    } finally { conn.disconnect() }
+                val endpoint = session.dataEndpoint?.takeIf { it.isNotBlank() }
+                    ?: throw IllegalStateException("会话缺少沙箱文件服务地址")
+                try {
+                    return SandboxFiles.read(endpoint, session.token, path)
+                } catch (e: SandboxFiles.ReadFailure) {
+                    if (attempt == 1 || e.status !in setOf(401, 403, 404)) throw e
                 }
-            } catch (e: Exception) { sandboxFailure = e }
+            }
+            error("沙箱文件读取失败")
         }
         val urls = LinkedHashSet<String>()
         artifact.uri.takeIf { it.startsWith("https://") }?.let(urls::add)
@@ -711,7 +703,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
                 presignedDownloadUrls(artifact).forEach { if (it !in urls) urls.add(it) }
             }
         }
-        throw IllegalStateException("下载失败：$lastError" + (sandboxFailure?.message?.let { "；$it" } ?: ""))
+        throw IllegalStateException("下载失败：$lastError")
     }
 
     private fun fetchArtifact(url: String): Pair<Int, ByteArray?> {
@@ -1103,8 +1095,8 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
             link = link,
             token = token,
             cwd = o.optString("cwd").takeIf { it.isNotBlank() },
-            dataEndpoint = o.optString("e2bDataEndpoint").takeIf { it.isNotBlank() }
-                ?: o.optString("dataEndpoint").takeIf { it.isNotBlank() },
+            sandboxId = o.optString("sandboxId").takeIf { it.isNotBlank() },
+            dataEndpoint = SandboxFiles.dataEndpoint(o),
             sessionId = o.optString("sessionId").ifBlank { o.optString("session_id") }.ifBlank { id }
         )
     }
@@ -1243,7 +1235,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         private const val ACP_RESOLVE_INTERRUPTION = "_codebuddy.ai/resolveInterruption"
         private const val REQUEST_ID_HEADER = "X-Request-ID"
 
-        private val ARTIFACT_URI = Regex("""(?:agent://(?:files/)?|file:///workspace/)[^\s"'\\()\[\]{}<>，。；：！？、]+""")
+        private val ARTIFACT_URI = Regex("""(?:agent://(?:files/)?|file:///(?:workspace|root)/)[^\s"'\\()\[\]{}<>，。；：！？、]+""")
 
         private val WAITING_STATES = setOf(
             "WAITING_USER_INPUT", "WAITING_INPUT", "REQUIRES_ACTION", "PAUSED", "BLOCKED"

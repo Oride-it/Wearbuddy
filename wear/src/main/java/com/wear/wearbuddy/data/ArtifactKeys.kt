@@ -11,10 +11,10 @@ internal object ArtifactKeys {
     )
     private const val HEX_DIGITS = "0123456789ABCDEF"
 
-    fun workspacePath(uri: String): String? {
+    fun sandboxPath(uri: String): String? {
         val raw = when {
-            uri.startsWith("file:///workspace/") -> uri.removePrefix("file://")
-            uri.startsWith("/workspace/") -> uri
+            uri.startsWith("file:///workspace/") || uri.startsWith("file:///root/") -> uri.removePrefix("file://")
+            uri.startsWith("/workspace/") || uri.startsWith("/root/") -> uri
             uri.startsWith("agent://files/") -> "/" + uri.removePrefix("agent://files/").trimStart('/')
             uri.startsWith("agent:///") -> uri.removePrefix("agent://")
             uri.startsWith("agent://") -> "/" + uri.removePrefix("agent://")
@@ -23,7 +23,7 @@ internal object ArtifactKeys {
         val decoded = raw.split('/').joinToString("/") { decodeSegment(it) }
         val twice = decoded.split('/').joinToString("/") { decodeSegment(it) }
         if (listOf(raw, decoded, twice).any { path ->
-            !path.startsWith("/workspace/") || path.contains('\\') || path.contains('\u0000') ||
+            !(path.startsWith("/workspace/") || path.startsWith("/root/")) || path.contains('\\') || path.contains('\u0000') ||
                 path.split('/').any { it == "." || it == ".." }
         }) return null
         return "/" + decoded.split('/').filter { it.isNotEmpty() }.joinToString("/")

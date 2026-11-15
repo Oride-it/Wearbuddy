@@ -6,16 +6,18 @@ import org.junit.Test
 class ArtifactKeysTest {
 
     @Test fun `sandbox artifacts retain workspace and decode names once`() {
-        assertEquals("/workspace/中文 报告.md", ArtifactKeys.workspacePath("agent:///workspace/%E4%B8%AD%E6%96%87%20%E6%8A%A5%E5%91%8A.md"))
-        assertEquals("/workspace/report.pdf", ArtifactKeys.workspacePath("agent://files/workspace/report.pdf"))
-        assertEquals("/workspace/report.pdf", ArtifactKeys.workspacePath("file:///workspace/report.pdf"))
-        assertEquals("/workspace/a+b.txt", ArtifactKeys.workspacePath("agent:///workspace/a+b.txt"))
+        assertEquals("/workspace/中文 报告.md", ArtifactKeys.sandboxPath("agent:///workspace/%E4%B8%AD%E6%96%87%20%E6%8A%A5%E5%91%8A.md"))
+        assertEquals("/workspace/report.pdf", ArtifactKeys.sandboxPath("agent://files/workspace/report.pdf"))
+        assertEquals("/workspace/report.pdf", ArtifactKeys.sandboxPath("file:///workspace/report.pdf"))
+        assertEquals("/root/output/report.pdf", ArtifactKeys.sandboxPath("agent:///root/output/report.pdf"))
+        assertEquals("/root/report.pdf", ArtifactKeys.sandboxPath("file:///root/report.pdf"))
+        assertEquals("/workspace/a+b.txt", ArtifactKeys.sandboxPath("agent:///workspace/a+b.txt"))
     }
 
     @Test fun `sandbox reads reject traversal including double encoded traversal`() {
-        for (uri in listOf("agent:///root/a", "agent:///workspace/../secret", "agent:///workspace/%2e%2e/secret",
+        for (uri in listOf("agent:///workspace/../secret", "agent:///workspace/%2e%2e/secret",
             "agent:///workspace/%252e%252e/secret", "agent:///workspace/a%5Cb", "agent:///workspace/a%00b")) {
-            assertNull(uri, ArtifactKeys.workspacePath(uri))
+            assertNull(uri, ArtifactKeys.sandboxPath(uri))
         }
     }
 
