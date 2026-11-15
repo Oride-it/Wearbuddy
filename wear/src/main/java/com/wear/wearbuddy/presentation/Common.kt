@@ -1,0 +1,355 @@
+package com.wear.wearbuddy.presentation
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Input
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.wear.compose.material3.Card
+import androidx.wear.compose.material3.CardDefaults
+import androidx.wear.compose.material3.FilledIconButton
+import androidx.wear.compose.material3.FilledTonalIconButton
+import androidx.wear.compose.material3.Icon
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.SurfaceTransformation
+import androidx.wear.compose.material3.Text
+import com.wear.wearbuddy.data.ChatMessage
+import com.wear.wearbuddy.data.ChatRole
+import com.wear.wearbuddy.data.TaskStatus
+
+/** 触感反馈开关（由设置驱动）。 */
+val LocalHapticsEnabled = staticCompositionLocalOf { true }
+
+/** 主操作点击时的一次触感反馈。 */
+@Composable
+fun rememberClickHaptic(): () -> Unit {
+    val feedback = LocalHapticFeedback.current
+    val enabled = LocalHapticsEnabled.current
+    return remember(feedback, enabled) {
+        if (enabled) {
+            { feedback.performHapticFeedback(HapticFeedbackType.LongPress) }
+        } else {
+            {}
+        }
+    }
+}
+
+@Composable
+fun statusLabelOf(status: TaskStatus): String {
+    val s = LocalStrings.current
+    return when (status) {
+        TaskStatus.WORKING -> s.statusExecuting
+        TaskStatus.BLOCKED -> s.statusWaitingInput
+        TaskStatus.DONE -> s.statusDone
+        TaskStatus.FAILED -> s.statusFailed
+        TaskStatus.STOPPED -> s.statusStopped
+    }
+}
+
+@Composable
+fun statusColorOf(status: TaskStatus): Color = when (status) {
+    TaskStatus.WORKING -> MaterialTheme.colorScheme.primary
+    TaskStatus.BLOCKED -> MaterialTheme.colorScheme.tertiary
+    TaskStatus.DONE -> MaterialTheme.colorScheme.primary
+    TaskStatus.FAILED -> MaterialTheme.colorScheme.error
+    TaskStatus.STOPPED -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/** 状态小徽标：圆角胶囊文字（配合卡片使用）。 */
+@Composable
+fun StatusBadge(status: TaskStatus, modifier: Modifier = Modifier) {
+    val color = statusColorOf(status)
+    Box(
+        modifier
+            .clip(CircleShape)
+            .background(color.copy(alpha = 0.18f))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+    ) {
+        Text(
+            statusLabelOf(status),
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
+    }
+}
+
+/** 合并两份 PaddingValues（ScreenScaffold 的内边距 + 页面自己的边距）。 */
+@Composable
+operator fun PaddingValues.plus(other: PaddingValues): PaddingValues {
+    val dir = androidx.compose.ui.platform.LocalLayoutDirection.current
+    return PaddingValues(
+        start = calculateLeftPadding(dir) + other.calculateLeftPadding(dir),
+        top = calculateTopPadding() + other.calculateTopPadding(),
+        end = calculateRightPadding(dir) + other.calculateRightPadding(dir),
+        bottom = calculateBottomPadding() + other.calculateBottomPadding()
+    )
+}
+
+/** 灰色分组卡片：默认圆弧外形，介绍等长文本可单独指定圆角矩形。 */
+@Composable
+fun SectionCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    transformation: SurfaceTransformation? = null,
+    shape: androidx.compose.ui.graphics.Shape = androidx.wear.compose.material3.CardDefaults.shape,
+    onClick: () -> Unit = {},
+    content: @Composable () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        transformation = transformation,
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp)
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1
+        )
+        Spacer(Modifier.height(6.dp))
+        Column(Modifier.fillMaxWidth()) { content() }
+    }
+}
+
+/** 分组内的一行：图标 + 标签 + 尾值 + 箭头，整行可点击。 */
+@Composable
+fun SettingRow(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    value: String? = null,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    val haptic = rememberClickHaptic()
+    androidx.wear.compose.material3.FilledTonalButton(
+        onClick = { haptic(); onClick() }, modifier = modifier.fillMaxWidth()
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (value != null) { Spacer(Modifier.width(6.dp)); Text(value, maxLines = 1) }
+        trailing?.invoke()
+    }
+}
+
+/**
+ * 底部输入条：三个贴合圆屏的按钮｜左选模型｜中语音（主色）｜右打开「发消息」输入页。
+ */
+@Composable
+fun InputBar(
+    onModelClick: () -> Unit,
+    onVoiceClick: () -> Unit,
+    onOpenInput: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    val haptic = rememberClickHaptic()
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+    ) {
+        FilledTonalIconButton(
+            onClick = {
+                haptic()
+                onModelClick()
+            },
+            modifier = Modifier.size(42.dp),
+            enabled = enabled
+        ) {
+            Icon(
+                Icons.Rounded.SmartToy,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        FilledIconButton(
+            onClick = {
+                haptic()
+                onVoiceClick()
+            },
+            modifier = Modifier.size(42.dp),
+            enabled = enabled
+        ) {
+            Icon(
+                Icons.Rounded.Mic,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        FilledTonalIconButton(
+            onClick = {
+                haptic()
+                onOpenInput()
+            },
+            modifier = Modifier.size(42.dp),
+            enabled = enabled
+        ) {
+            Icon(
+                Icons.AutoMirrored.Rounded.Input,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+/** 多行文本输入（新建项目 / 登录表单）。 */
+@Composable
+fun FieldInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    hint: String = "",
+    singleLine: Boolean = true,
+    maxLines: Int = if (singleLine) 1 else 4,
+    keyboardOptions: androidx.compose.foundation.text.KeyboardOptions =
+        androidx.compose.foundation.text.KeyboardOptions.Default
+) {
+    Box(
+        modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        if (value.isEmpty()) {
+            Text(
+                hint,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = singleLine,
+            maxLines = maxLines,
+            keyboardOptions = keyboardOptions,
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+/** 对话消息使用灰色容器；思考和工具过程采用无边框的弱化样式。 */
+@Composable
+fun MessageBubble(
+    message: ChatMessage,
+    modifier: Modifier = Modifier,
+    transformation: SurfaceTransformation? = null
+) {
+    when (message.role) {
+        ChatRole.THOUGHT, ChatRole.TOOL -> {
+            Card(
+                onClick = {},
+                modifier = modifier.fillMaxWidth(),
+                transformation = transformation,
+                colors = CardDefaults.cardColors(
+                    containerColor = Color.Transparent,
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    if (message.role == ChatRole.TOOL) LocalStrings.current.statusExecuting
+                    else LocalStrings.current.thoughtLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    message.text,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp
+                )
+            }
+        }
+
+        else -> {
+            Card(
+                onClick = {},
+                modifier = modifier.fillMaxWidth(),
+                transformation = transformation,
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                Text(
+                    message.text,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+/** 空态提示。 */
+@Composable
+fun EmptyHint(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 20.dp)
+    )
+}
+
+/** 手机号打码：138****1234。 */
+fun maskPhone(phone: String): String =
+    if (phone.length == 11) phone.take(3) + "****" + phone.takeLast(4) else phone
+
+/** 积分显示：整数不带小数点。 */
+fun formatPoints(value: Double): String =
+    if (value % 1.0 == 0.0) value.toLong().toString()
+    else String.format(java.util.Locale.US, "%.1f", value)
