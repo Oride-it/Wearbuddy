@@ -123,18 +123,31 @@ internal fun ArtifactRow(
         }
     }
 
+    val openArtifact = {
+        haptic()
+        if (file.isHtml()) {
+            launchHtml = true
+            actions.loadArtifactPreview(file, taskId)
+        } else if (preview?.error != null) {
+            actions.loadArtifactPreview(file, taskId)
+        } else {
+            expanded = !expanded
+            if (expanded) actions.loadArtifactPreview(file, taskId)
+        }
+    }
+    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) openArtifact()
+        else android.widget.Toast.makeText(context,
+            if (com.wear.wearbuddy.data.CloudSettings(context).language == "zh") "需要存储权限才能保存到公共 Download 文件夹" else
+                "Storage permission is needed to save to Download", android.widget.Toast.LENGTH_LONG).show()
+    }
     Card(
         onClick = {
-            haptic()
-            if (file.isHtml()) {
-                launchHtml = true
-                actions.loadArtifactPreview(file, taskId)
-            } else if (preview?.error != null) {
-                actions.loadArtifactPreview(file, taskId)
-            } else {
-                expanded = !expanded
-                if (expanded) actions.loadArtifactPreview(file, taskId)
-            }
+            if (android.os.Build.VERSION.SDK_INT <= 28 && context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) permissionLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            else openArtifact()
         },
         onLongClick = { copy(file.name) },
         onLongClickLabel = s.copyTextLabel,

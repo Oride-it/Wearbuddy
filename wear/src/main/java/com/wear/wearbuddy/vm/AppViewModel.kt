@@ -52,7 +52,7 @@ import java.security.MessageDigest
 fun artifactPreviewKey(taskId: String?, uri: String) = "${taskId.orEmpty()}|$uri"
 
 data class ArtifactPreview(val loading: Boolean = true, val text: String? = null,
-    val localPath: String? = null, val error: String? = null)
+    val localPath: String? = null, val error: String? = null, val publicUri: String? = null)
 
 /** 输入页里待发送的附件（图片 / 文件），发送时才读取字节并上传云端。 */
 data class PendingAttachment(val name: String, val uri: String, val mimeType: String)
@@ -421,19 +421,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(artifactPreviews = it.artifactPreviews + (key to ArtifactPreview())) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { runCatching {
-                val bytes = sourceRepo.downloadArtifact(artifact, taskId)
-                val dir = File(getApplication<Application>().filesDir, "artifacts/$profileId").apply { mkdirs() }
-                val hash = MessageDigest.getInstance("SHA-256").digest(key.toByteArray())
-                    .joinToString("") { "%02x".format(it) }.take(16)
-                val name = artifact.name.substringAfterLast('/').substringAfterLast('\\')
-                    .replace(Regex("[^\\p{L}\\p{N}._-]"), "_").take(100).ifBlank { "file" }
-                val file = File(dir, "$hash-$name").apply { writeBytes(bytes) }
+                val context = getApplication<Application>()
+                val bytes = com.wear.wearbuddy.data.ArtifactDownloads.cachedBytes(context, profileId, key, artifact.name)
+                    ?: sourceRepo.downloadArtifact(artifact, taskId)
+                val saved = com.wear.wearbuddy.data.ArtifactDownloads.save(context, profileId, key, artifact.name, artifact.mimeType, bytes)
+                val file = saved.previewFile
+                val name = artifact.name
                 if (taskId != null) sourceRepo.markDownloaded(taskId, artifact.uri, file.absolutePath)
                 val extension = name.substringAfterLast('.', "").lowercase()
                 val text = if (artifact.mimeType?.startsWith("text/") == true || extension in setOf(
                     "txt", "md", "csv", "tsv", "json", "xml", "html", "htm", "log", "yaml", "yml", "kt", "py", "js", "css"
                 )) bytes.toString(Charsets.UTF_8) else null
-                ArtifactPreview(loading = false, text = text, localPath = file.absolutePath)
+                ArtifactPreview(loading = false, text = text, localPath = file.absolutePath, publicUri = saved.publicUri.toString())
             } }
             val preview = result.getOrElse { ArtifactPreview(loading = false, error = it.message ?: "文件加载失败") }
             if (settings.profileId != profileId) return@launch
