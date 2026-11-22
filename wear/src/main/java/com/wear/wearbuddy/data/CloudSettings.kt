@@ -50,6 +50,10 @@ class CloudSettings(context: Context, val profileId: String = AccountStore.activ
         get() = prefs.getStringSet("session_stops:${baseUrl}:${accountHint}", emptySet()).orEmpty().toSet()
         set(value) = prefs.edit().putStringSet("session_stops:${baseUrl}:${accountHint}", value.toSet()).apply()
 
+    var hasDraftChat: Boolean
+        get() = prefs.getBoolean("empty_chat:${baseUrl}:${accountHint}", false)
+        set(value) = prefs.edit().putBoolean("empty_chat:${baseUrl}:${accountHint}", value).apply()
+
     /** 当前选用的模型 ID（空表示用云端默认）。 */
     var selectedModel: String
         get() = prefs.getString(KEY_MODEL, "").orEmpty()

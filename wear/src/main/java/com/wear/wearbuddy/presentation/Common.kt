@@ -221,7 +221,7 @@ fun InputBar(
         ) {
             Icon(
                 Icons.Rounded.SmartToy,
-                contentDescription = null,
+                contentDescription = LocalStrings.current.modelPickerTitle,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -235,7 +235,7 @@ fun InputBar(
         ) {
             Icon(
                 Icons.Rounded.Mic,
-                contentDescription = null,
+                contentDescription = LocalStrings.current.voiceInput,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -249,7 +249,7 @@ fun InputBar(
         ) {
             Icon(
                 Icons.AutoMirrored.Rounded.Input,
-                contentDescription = null,
+                contentDescription = LocalStrings.current.composeTitle,
                 modifier = Modifier.size(22.dp)
             )
         }

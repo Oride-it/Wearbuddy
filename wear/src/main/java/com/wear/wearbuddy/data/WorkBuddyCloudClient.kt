@@ -3,6 +3,7 @@ package com.wear.wearbuddy.data
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
@@ -295,14 +296,16 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
     }
 
     /** History replay shares the prompt connection, so live updates cannot be stolen by a second reader. */
-    fun loadHistory(session: Session): List<ChatMessage> = linkOf(session).snapshot().messages
+    fun loadHistory(id: String): List<ChatMessage> = linkOf(id).snapshot().messages
 
     internal var onStreamChanged: ((String, AcpSnapshot) -> Unit)? = null
 
-    internal fun streamSnapshot(id: String): AcpSnapshot? = links[id]?.snapshot()
+    internal fun streamSnapshot(id: String): AcpSnapshot? = links[id]?.takeIf { it.alive }?.snapshot()
 
     /** Send on the loaded connection and consume both live updates and the final RPC result. */
     fun sendPrompt(session: Session, text: String, attachments: List<Artifact> = emptyList()) {
+        val link = linkOf(session.conversationId, session)
+        val loaded = link.session
         val model = settings.selectedModel.ifBlank { DEFAULT_MODEL }
         val blocks = JSONArray()
         val sourceBlocks = JSONArray()
@@ -311,7 +314,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         attachments.forEach { a ->
             val bytes = inlineBytes(a)
             val sandboxPath = bytes?.let {
-                runCatching { uploadToSandbox(session, a.name, it) }.getOrNull()
+                runCatching { uploadToSandbox(loaded, a.name, it) }.getOrNull()
             }
             val block = if (sandboxPath != null && bytes != null) {
                 sandboxPaths += a.name to sandboxPath
@@ -336,12 +339,11 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
             .put("model", model)
             .put("extra", JSONObject().put("sourceContentBlocks", sourceBlocks))
         val params = JSONObject()
-            .put("sessionId", session.sessionId)
-            .put("cwd", session.cwd.orEmpty())
+            .put("sessionId", loaded.sessionId)
+            .put("cwd", loaded.cwd.orEmpty())
             .put("mcpServers", JSONArray())
             .put("prompt", blocks)
             .put("_meta", JSONObject().put("codebuddy.ai", meta))
-        val link = linkOf(session)
         link.beginTurn(text)
         link.rpc(ACP_PROMPT, params, PROMPT_READ_TIMEOUT)
     }
@@ -439,17 +441,19 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
 
     /** 设定本会话实际使用的大模型（只对同一条连接上跑的 agent 生效）。 */
     fun setModel(session: Session, modelId: String) {
-        linkOf(session).rpc(
+        val link = linkOf(session.conversationId, session)
+        link.rpc(
             ACP_SET_MODEL,
-            JSONObject().put("sessionId", session.sessionId).put("modelId", modelId)
+            JSONObject().put("sessionId", link.session.sessionId).put("modelId", modelId)
         )
     }
 
     /** 中断当前执行。 */
     fun cancelTurn(session: Session) {
-        linkOf(session).rpc(
+        val link = linkOf(session.conversationId, session)
+        link.rpc(
             ACP_CANCEL,
-            JSONObject().put("sessionId", session.sessionId),
+            JSONObject().put("sessionId", link.session.sessionId),
             timeoutMs = CANCEL_TIMEOUT
         )
     }
@@ -457,13 +461,14 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
     /** 回答 askuser 问题：走 ACP 扩展方法。 */
     fun resolveInterruption(session: Session, question: AskQuestion, answer: String) {
         val requestId = question.requestId ?: return
+        val link = linkOf(session.conversationId, session)
         val params = JSONObject()
-            .put("sessionId", session.sessionId)
+            .put("sessionId", link.session.sessionId)
             .put("requestId", requestId)
             .put("toolCallId", requestId)
             .put("optionId", answer)
             .put("answer", answer)
-        linkOf(session).rpc(ACP_RESOLVE_INTERRUPTION, params)
+        link.rpc(ACP_RESOLVE_INTERRUPTION, params)
     }
 
     // ---------- 积分用量 ----------
@@ -857,15 +862,14 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
     // ---------- 内部：常驻 ACP 连接 ----------
 
     inner class AcpLink internal constructor(
-        val sessionId: String,
-        private val acpSessionId: String,
+        val session: Session,
         private val url: String,
         private val bearer: String,
         private val connectionId: String,
         private val sessionToken: String,
         private val raw: HttpURLConnection
-    ) {
-        private val events = AcpEvents(acpSessionId, sessionId)
+    ) : AutoCloseable {
+        private val events = AcpEvents(session.sessionId, session.conversationId)
         private val pending = java.util.concurrent.ConcurrentHashMap<Int, PendingRpc>()
         @Volatile private var replaying = true
 
@@ -876,8 +880,10 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
             publish()
         }
 
-        private fun publish() {
-            if (!replaying) onStreamChanged?.invoke(sessionId, events.snapshot())
+        internal fun publish() {
+            if (!replaying && alive && links[session.conversationId] === this) {
+                onStreamChanged?.invoke(session.conversationId, events.snapshot())
+            }
         }
 
         internal fun receive(data: String) {
@@ -887,7 +893,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
                 val request = pending[id] ?: return
                 request.response = root
                 if (request.method == ACP_PROMPT) events.finishTurn(root.optJSONObject("result"), root.optJSONObject("error"))
-                if (request.method == ACP_LOAD) replaying = false
+                if (request.method == ACP_LOAD && !root.has("error")) replaying = false
                 publish()
                 request.done.countDown()
             } else if (events.accept(root, replaying)) publish()
@@ -911,7 +917,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         val alive: Boolean get() = !closed
 
         fun rpc(method: String, params: JSONObject, timeoutMs: Int = READ_TIMEOUT) {
-            check(alive) { "ACP 连接已关闭" }
+            if (!alive) throw IOException("ACP 连接已关闭")
             if (method == ACP_CANCEL) {
                 postRpc(url, bearer, connectionId, sessionToken, method, params, timeoutMs, null, ::receive)
                 return
@@ -927,14 +933,18 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
                 request.response?.optJSONObject("error")?.let {
                     throw IllegalStateException(it.optString("message").ifBlank { "ACP $method 失败" })
                 }
-                check(request.response != null) { "ACP 连接已断开，请重新打开任务同步" }
+                if (request.response == null) throw IOException("ACP 连接已断开")
                 lastUsedAt = System.currentTimeMillis()
+            } catch (failure: IOException) {
+                // The server may have accepted the prompt. Only drop this exact transport.
+                close()
+                throw failure
             } finally {
                 pending.remove(id)
             }
         }
 
-        fun close() {
+        override fun close() {
             closed = true
             pending.values.forEach { it.done.countDown() }
             runCatching { raw.disconnect() }
@@ -947,40 +957,34 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
     }
 
     private val links = java.util.concurrent.ConcurrentHashMap<String, AcpLink>()
+    @Volatile private var linksClosed = false
 
-    @Synchronized private fun linkOf(session: Session): AcpLink {
-        links[session.conversationId]?.takeIf { it.alive }?.let { return it }
-        // A waking sandbox may not serve ACP yet; refresh expired credentials between safe handshake attempts.
-        var current = session
-        var ready: AcpLink? = null
-        var failure: Exception? = null
-        for (attempt in 0..2) {
-            try {
-                if (attempt > 0) {
-                    Thread.sleep(500L * attempt)
-                    current = fetchSession(session.conversationId)
-                }
-                ready = openLink(current)
-                break
-            } catch (e: Exception) { failure = e }
-        }
-        val link = ready ?: throw checkNotNull(failure)
-        links[session.conversationId] = link
-        try {
-            link.initialize(current)
-            return link
-        } catch (t: Throwable) {
-            links.remove(session.conversationId, link)
+    @Synchronized private fun linkOf(id: String, initial: Session? = null): AcpLink {
+        check(!linksClosed) { "会话已关闭" }
+        links[id]?.takeIf { it.alive }?.let { return it }
+        val link = openLoadedAcpLink(
+            sessionForAttempt = { attempt ->
+                check(!linksClosed) { "会话已关闭" }
+                if (attempt == 0 && initial != null) initial else fetchSession(id)
+            },
+            open = ::openLink,
+            load = { transport, session ->
+                transport.initialize(session)
+                if (!transport.alive) throw IOException("ACP 连接已断开")
+            }
+        )
+        links[id] = link
+        if (linksClosed) {
+            links.remove(id, link)
             link.close()
-            throw t
+            error("会话已关闭")
         }
-    }
-
-    fun closeLink(id: String) {
-        links.remove(id)?.close()
+        link.publish()
+        return link
     }
 
     fun closeAllLinks() {
+        linksClosed = true
         links.values.forEach { it.close() }
         links.clear()
     }
@@ -989,7 +993,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         val now = System.currentTimeMillis()
         links.values
             .filter { !it.alive || now - it.lastUsedAt > maxIdleMs }
-            .forEach { link -> if (links.remove(link.sessionId, link)) link.close() }
+            .forEach { link -> if (links.remove(link.session.conversationId, link)) link.close() }
     }
 
     private fun openLink(session: Session): AcpLink {
@@ -1009,18 +1013,18 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         val sessionToken: String
         try {
             val status = raw.responseCode
-            check(status in 200..299) { "ACP 连接失败：HTTP $status，请重试或重新打开会话" }
-            check(raw.contentType.orEmpty().contains("text/event-stream", ignoreCase = true)) {
-                "ACP 接入点未返回事件流，请重新打开会话"
+            if (status !in 200..299) throw AcpHttpException(status, "连接")
+            if (!raw.contentType.orEmpty().contains("text/event-stream", ignoreCase = true)) {
+                throw IOException("ACP 接入点未返回事件流")
             }
             connectionId = raw.getHeaderField(ACP_CONNECTION_HEADER)?.trim()?.takeIf { it.isNotEmpty() }
-                ?: throw IllegalStateException("ACP 服务未返回连接标识，请稍后重试")
+                ?: throw IOException("ACP 服务未返回连接标识")
             sessionToken = raw.getHeaderField(ACP_SESSION_TOKEN_HEADER)?.trim().orEmpty()
         } catch (t: Throwable) {
             runCatching { raw.disconnect() }
             throw t
         }
-        val link = AcpLink(session.conversationId, session.sessionId, url, session.token, connectionId, sessionToken, raw)
+        val link = AcpLink(session, url, session.token, connectionId, sessionToken, raw)
         // Decode every event on the same stream used by session/load and session/prompt.
         Thread({
             runCatching {
@@ -1067,7 +1071,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         try {
             post.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
             val code = post.responseCode
-            if (code !in 200..299) throw IllegalStateException("ACP $method 失败：HTTP $code")
+            if (code !in 200..299) throw AcpHttpException(code, method)
             post.inputStream?.let { input ->
                 BufferedReader(InputStreamReader(input, Charsets.UTF_8)).use { reader ->
                     if (post.contentType.orEmpty().contains("text/event-stream", ignoreCase = true)) {

@@ -133,7 +133,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
         withContext(Dispatchers.IO) { client.downloadArtifact(artifact, conversationId) }
 
     override suspend fun loadHistory(id: String): List<ChatMessage> =
-        withContext(Dispatchers.IO) { client.loadHistory(sessionOf(id)) }
+        withContext(Dispatchers.IO) { client.loadHistory(id) }
 
     override suspend fun listModels(): List<RemoteModel> =
         withContext(Dispatchers.IO) { client.listModels(settings.enterpriseId) }
@@ -277,7 +277,6 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
                 withContext(Dispatchers.IO) { call() }
             } catch (e: java.io.IOException) {
                 // A lost response does not mean the accepted task stopped on the server.
-                client.closeLink(id)
                 updateTask(id) { it.copy(error = "连接中断，正在重新同步云端进度") }
             } catch (e: Exception) {
                 updateTask(id) {

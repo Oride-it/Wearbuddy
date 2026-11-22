@@ -24,9 +24,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.wear.compose.foundation.lazy.TransformingLazyColumn
-import androidx.wear.compose.foundation.lazy.items
-import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.focus.FocusRequester
+import androidx.wear.compose.foundation.rotary.rotaryScrollable
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.material3.FilledTonalIconButton
+import androidx.compose.material.icons.rounded.ArrowDownward
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.Card
@@ -59,30 +68,20 @@ fun TaskDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val state by actions.ui.collectAsState()
+    TaskDetailContent(state, actions, modifier)
+}
+
+@Composable
+internal fun TaskDetailContent(state: com.wear.wearbuddy.vm.UiState, actions: AppViewModel, modifier: Modifier = Modifier) {
     val s = LocalStrings.current
     val task = state.activeTask ?: return
-    val listState = rememberTransformingLazyColumnState()
+    val listState = rememberLazyListState()
     val haptic = rememberClickHaptic()
     val copy = com.wear.wearbuddy.presentation.rememberCopyText()
 
-    val voiceLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val spoken = result.data
-                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                ?.firstOrNull()
-                .orEmpty()
-            if (spoken.isNotBlank()) actions.sendReply(spoken)
-        }
-    }
-
-    // 新消息到达时滚到底部
-    LaunchedEffect(state.history.size) {
-        if (state.history.isNotEmpty()) {
-            runCatching { listState.requestScrollToItem(state.history.size + 2) }
-        }
-    }
+    val scope = rememberCoroutineScope()
+    val rotaryFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { rotaryFocus.requestFocus() }
 
     ScreenScaffold(
         scrollState = listState,
@@ -94,8 +93,11 @@ fun TaskDetailScreen(
                 .padding(padding)
         ) {
             Box(Modifier.weight(1f)) {
-                TransformingLazyColumn(
+                LazyColumn(
                     state = listState,
+                    modifier = Modifier.fillMaxSize().rotaryScrollable(
+                        RotaryScrollableDefaults.behavior(listState), rotaryFocus
+                    ),
                     contentPadding = PaddingValues(
                         start = 12.dp,
                         end = 12.dp,
@@ -104,7 +106,7 @@ fun TaskDetailScreen(
                     )
                 ) {
                     // 状态头
-                    item {
+                    item(key = "header") {
                         TitleCard(
                             onClick = {},
                             onLongClick = { copy(task.title) },
@@ -134,20 +136,21 @@ fun TaskDetailScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                             },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                ,
+                            modifier = Modifier.fillMaxWidth(),
                             transformation = null
                         )
+                    }
+
+                    if (state.historySyncFailed) item(key = "history-sync") {
+                        FilledTonalButton(onClick = actions::retryHistory, modifier = Modifier.fillMaxWidth(),
+                            label = { Text(s.historyUnavailable) }, secondaryLabel = { Text(s.retry) })
                     }
 
                     task.error?.let { err ->
                         item {
                             Card(
                                 onClick = {},
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    ,
+                                modifier = Modifier.fillMaxWidth(),
                                 transformation = null,
                                 colors = CardDefaults.cardColors(
                                     containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -169,9 +172,7 @@ fun TaskDetailScreen(
                         item {
                             Card(
                                 onClick = {},
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    ,
+                                modifier = Modifier.fillMaxWidth(),
                                 transformation = null
                             ) {
                                 Text(
@@ -181,15 +182,13 @@ fun TaskDetailScreen(
                             }
                         }
                         val options = task.ask.options.ifEmpty { emptyList() }
-                        items(options, key = { it.label }) { option ->
+                        items(options, key = { "option:${it.label}" }) { option ->
                             Button(
                                 onClick = {
                                     haptic()
                                     actions.answerAsk(option.label)
                                 },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    ,
+                                modifier = Modifier.fillMaxWidth(),
                                 transformation = null
                             ) {
                                 Text(option.label, maxLines = 2)
@@ -222,7 +221,7 @@ fun TaskDetailScreen(
                             )
                         }
                     } else {
-                        items(state.history) { message ->
+                        itemsIndexed(state.history, key = { index, _ -> "message:$index" }) { _, message ->
                             MessageBubble(
                                 message = message,
                                 modifier = Modifier,
@@ -259,7 +258,7 @@ fun TaskDetailScreen(
                         item {
                             ListHeader { Text(s.artifacts) }
                         }
-                        items(files, key = { it.uri }) { file ->
+                        items(files, key = { "artifact:${it.uri}" }) { file ->
                             ArtifactRow(actions, task.id, file,
                                 state.artifactPreviews[com.wear.wearbuddy.vm.artifactPreviewKey(task.id, file.uri)],
                                 Modifier.fillMaxWidth())
@@ -267,7 +266,7 @@ fun TaskDetailScreen(
                     }
 
                     // 停止 / 重试
-                    item {
+                    item(key = "actions") {
                         when (task.status) {
                             TaskStatus.WORKING, TaskStatus.BLOCKED -> {
                                 FilledTonalButton(
@@ -275,9 +274,7 @@ fun TaskDetailScreen(
                                         haptic()
                                         actions.stopActiveTask()
                                     },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        ,
+                                    modifier = Modifier.fillMaxWidth(),
                                     transformation = null,
                                     colors = androidx.wear.compose.material3.ButtonDefaults.filledTonalButtonColors(
                                         containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -300,9 +297,7 @@ fun TaskDetailScreen(
                                         haptic()
                                         actions.retryActiveTask()
                                     },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        ,
+                                    modifier = Modifier.fillMaxWidth(),
                                     transformation = null
                                 ) {
                                     Text(s.retry, maxLines = 1)
@@ -312,30 +307,71 @@ fun TaskDetailScreen(
                             else -> Unit
                         }
                     }
+                    item(key = "bottom") { Spacer(Modifier.height(1.dp)) }
+                }
+                if (listState.canScrollForward) {
+                    FilledTonalIconButton(onClick = {
+                        scope.launch { listState.scrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) }
+                    }, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 15.dp).size(32.dp)) {
+                        Icon(Icons.Rounded.ArrowDownward, contentDescription = s.jumpToBottom, modifier = Modifier.size(18.dp))
+                    }
                 }
             }
 
             // 底部追问输入条：选模型｜语音｜打开「发消息」输入页
-            if (task.status != TaskStatus.WORKING || state.history.isNotEmpty()) {
-                InputBar(
-                    onModelClick = actions::openModelPicker,
-                    onVoiceClick = {
-                        runCatching {
-                            voiceLauncher.launch(
-                                Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(
-                                        RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                                        RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                                    )
-                                    putExtra(RecognizerIntent.EXTRA_PROMPT, s.inputHint)
-                                }
-                            )
-                        }
-                    },
-                    onOpenInput = { actions.openCompose(task.id) },
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
-                )
-            }
+            ChatInputBar(actions::openModelPicker, actions::sendReply, { actions.openCompose(task.id) },
+                enabled = !state.busy && (task.status != TaskStatus.WORKING || state.history.isNotEmpty()))
         }
     }
+}
+
+@Composable
+internal fun NewChatScreen(actions: AppViewModel, modifier: Modifier = Modifier) {
+    val state by actions.ui.collectAsState()
+    val s = LocalStrings.current
+    Column(modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                ListHeader { Text(s.newChat) }
+                Text(s.startChat, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        ChatInputBar(actions::openModelPicker, actions::sendTask, { actions.openCompose(null) }, !state.busy)
+    }
+}
+
+@Composable
+private fun ChatInputBar(onModel: () -> Unit, onVoiceText: (String) -> Unit, onInput: () -> Unit, enabled: Boolean = true) {
+    val s = LocalStrings.current
+    val voiceLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val spoken = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                .orEmpty()
+            if (spoken.isNotBlank()) onVoiceText(spoken)
+        }
+    }
+
+    InputBar(
+        onModelClick = onModel,
+        onVoiceClick = {
+            runCatching {
+                voiceLauncher.launch(
+                    Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(
+                            RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                            RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                        )
+                        putExtra(RecognizerIntent.EXTRA_PROMPT, s.inputHint)
+                    }
+                )
+            }
+        },
+        onOpenInput = onInput,
+        enabled = enabled,
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+    )
 }

@@ -14,6 +14,12 @@ interface LocalizedStrings {
     val tabSettings: String
     // 任务页
     val inputHint: String
+    val newChat: String
+    val connectFirst: String
+    val startChat: String
+    val emptyChatHint: String
+    val jumpToBottom: String
+    val historyUnavailable: String
     val emptyTasks: String
     val notLoggedInHint: String
     val loginNow: String
@@ -143,11 +149,17 @@ private object ZhStrings : LocalizedStrings {
     override val copiedText = "已复制"
     override val previewHtml = "网页预览"
     override val appName = "Wearbuddy"
-    override val tabTasks = "任务"
+    override val tabTasks = "会话"
     override val tabProjects = "项目"
     override val tabSettings = "我的"
     override val inputHint = "询问任何事…"
-    override val emptyTasks = "还没有任务\n在下方输入即可开始"
+    override val emptyTasks = "还没有会话"
+    override val newChat = "新对话"
+    override val connectFirst = "先连接模型服务"
+    override val startChat = "发送第一条消息"
+    override val emptyChatHint = "点击上方新对话，开始第一段对话。"
+    override val jumpToBottom = "回到底部"
+    override val historyUnavailable = "会话暂未同步，正在重连"
     override val notLoggedInHint = "登录后即可下发云端任务"
     override val loginNow = "立即登录"
     override val statusThinking = "思考中"
@@ -166,7 +178,7 @@ private object ZhStrings : LocalizedStrings {
     override val artifactsEmpty = "还没有产物\n完成的任务会在这里出现"
     override val artifactTapToView = "点击查看或下载"
     override val artifactTapToRetry = "点按重试"
-    override val artifactSaved = "已保存到 Download/Wearbuddy"
+    override val artifactSaved = "已保存到手表 Download"
     override val askPrompt = "云端需要你补充信息"
     override val thoughtLabel = "思考"
     override val composeTitle = "发消息"
@@ -273,11 +285,17 @@ private object EnStrings : LocalizedStrings {
     override val copiedText = "Copied"
     override val previewHtml = "Preview HTML"
     override val appName = "Wearbuddy"
-    override val tabTasks = "Tasks"
+    override val tabTasks = "Chats"
     override val tabProjects = "Projects"
     override val tabSettings = "Me"
     override val inputHint = "Ask anything…"
-    override val emptyTasks = "No tasks yet\nType below to start"
+    override val emptyTasks = "No chats yet"
+    override val newChat = "New chat"
+    override val connectFirst = "Connect your account first"
+    override val startChat = "Send your first message"
+    override val emptyChatHint = "Tap New chat above to start your first conversation."
+    override val jumpToBottom = "Jump to bottom"
+    override val historyUnavailable = "Chat not synced. Reconnecting…"
     override val notLoggedInHint = "Sign in to dispatch cloud tasks"
     override val loginNow = "Sign in"
     override val statusThinking = "Thinking"
@@ -296,7 +314,7 @@ private object EnStrings : LocalizedStrings {
     override val artifactsEmpty = "No artifacts yet\nFiles from finished tasks appear here"
     override val artifactTapToView = "Tap to view or download"
     override val artifactTapToRetry = "Tap to retry"
-    override val artifactSaved = "Saved in Download/Wearbuddy"
+    override val artifactSaved = "Saved in watch Download"
     override val askPrompt = "Cloud needs more info"
     override val thoughtLabel = "Thinking"
     override val composeTitle = "Send message"

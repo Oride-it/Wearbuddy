@@ -78,7 +78,8 @@ fun ComposeScreen(
     val haptic = rememberClickHaptic()
     val listState = rememberTransformingLazyColumnState()
 
-    var text by remember { mutableStateOf("") }
+    val text = if (taskId == null) state.draft else state.replyDraft
+    val setText = if (taskId == null) actions::setDraft else actions::setReplyDraft
     var attachments by remember { mutableStateOf(listOf<PendingAttachment>()) }
 
     fun addAttachment(uri: Uri, fallbackMime: String) {
@@ -103,7 +104,7 @@ fun ComposeScreen(
                 ?.firstOrNull()
                 .orEmpty()
             if (spoken.isNotBlank()) {
-                text = if (text.isBlank()) spoken else "$text $spoken"
+                setText(if (text.isBlank()) spoken else "$text $spoken")
             }
         }
     }
@@ -177,7 +178,7 @@ fun ComposeScreen(
                         }
                         BasicTextField(
                             value = text,
-                            onValueChange = { text = it },
+                            onValueChange = setText,
                             minLines = 2,
                             maxLines = 5,
                             textStyle = TextStyle(
@@ -289,7 +290,7 @@ fun ComposeScreen(
                         onClick = {
                             haptic()
                             val clip = clipboard.getText()?.toString().orEmpty()
-                            if (clip.isNotEmpty()) text += clip
+                            if (clip.isNotEmpty()) setText(text + clip)
                         },
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
@@ -302,7 +303,7 @@ fun ComposeScreen(
                     FilledTonalButton(
                         onClick = {
                             haptic()
-                            text += "\n"
+                            setText(text + "\n")
                         },
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),

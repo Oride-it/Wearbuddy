@@ -181,6 +181,7 @@ private fun OverlayScreen(overlay: Overlay, active: Boolean, onSwipedAway: () ->
         CompositionLocalProvider(LocalScreenIsActive provides (active && LocalScreenIsActive.current)) {
         Box(layer) {
         when (overlay) {
+            Overlay.NewChat -> com.wear.wearbuddy.presentation.screens.NewChatScreen(viewModel, edgeModifier)
             is Overlay.TaskDetail -> TaskDetailScreen(viewModel, edgeModifier)
 
             is Overlay.Compose -> ComposeScreen(viewModel, overlay.taskId, edgeModifier)

@@ -59,6 +59,7 @@ data class PendingAttachment(val name: String, val uri: String, val mimeType: St
 
 /** 覆盖在三分页之上的子页面（进入新页面，不参与左右翻页）。 */
 sealed interface Overlay {
+    data object NewChat : Overlay
     data class TaskDetail(val id: String) : Overlay
     data class Compose(val taskId: String?) : Overlay
     data object AddProject : Overlay
@@ -94,6 +95,7 @@ data class LoginForm(
 data class UiState(
     val overlay: Overlay? = null,
     val tasks: List<Task> = emptyList(),
+    val hasDraftChat: Boolean = false,
     val connected: Boolean = false,
     val cloudError: String? = null,
     val loggedIn: Boolean = false,
@@ -120,6 +122,7 @@ data class UiState(
     // 会话详情
     val history: List<ChatMessage> = emptyList(),
     val historyLoading: Boolean = false,
+    val historySyncFailed: Boolean = false,
     val historyBusy: Boolean = false,
     val artifactPreviews: Map<String, ArtifactPreview> = emptyMap(),
     // 项目
@@ -214,6 +217,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 avatarUrl = "",
                 connected = repo.connected.value,
                 cloudError = repo.cloudError.value,
+                hasDraftChat = settings.isLoggedIn && settings.hasDraftChat,
+                draft = "",
+                replyDraft = "",
                 tasks = repo.tasks.value
             )
         }
@@ -250,8 +256,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         list.forEach { t ->
             val before = prev[t.id]
             if (before != null && before != t.status && t.id == _ui.value.activeTaskId) {
-                // 打开中的任务状态变化：刷新历史并按需朗读
-                refreshHistory(t.id)
                 if (t.status == TaskStatus.DONE && _ui.value.ttsEnabled) {
                     speakTaskResult(t)
                 }
@@ -270,6 +274,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- 任务 ----------
 
+    fun openNewChat() {
+        if (!settings.isLoggedIn) { openLogin(); return }
+        settings.hasDraftChat = true
+        _ui.update { it.copy(overlay = Overlay.NewChat, hasDraftChat = true) }
+    }
+
     fun setDraft(text: String) = _ui.update { it.copy(draft = text) }
 
     fun setReplyDraft(text: String) = _ui.update { it.copy(replyDraft = text) }
@@ -279,13 +289,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val prompt = text.trim()
         if (prompt.isBlank() || _ui.value.busy) return
         _ui.update { it.copy(busy = true) }
+        val fromDraft = _ui.value.overlay == Overlay.NewChat
         viewModelScope.launch {
             runCatching { repo.dispatch(prompt, ExecEnv.CLOUD) }
                 .onSuccess { id ->
+                    if (fromDraft) settings.hasDraftChat = false
                     _ui.update {
                         it.copy(
                             busy = false,
                             draft = "",
+                            hasDraftChat = settings.hasDraftChat,
+                            historySyncFailed = false,
                             history = listOf(ChatMessage(ChatRole.USER, prompt)),
                             historyLoading = false,
                             historyBusy = true,
@@ -305,8 +319,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update {
             it.copy(
                 overlay = Overlay.TaskDetail(id),
-                history = emptyList(),
+                history = it.tasks.firstOrNull { task -> task.id == id }?.messages.orEmpty(),
                 historyLoading = true,
+                historySyncFailed = false,
+                historyBusy = false,
                 replyDraft = "",
                 cloudModel = null
             )
@@ -368,10 +384,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         val dispatchPrompt = prompt.ifBlank { artifacts.firstOrNull()?.name ?: "新任务" }
                         runCatching { repo.dispatch(dispatchPrompt, ExecEnv.CLOUD, artifacts) }
                             .onSuccess { id ->
+                                settings.hasDraftChat = false
                                 _ui.update {
                                     it.copy(
                                         busy = false,
                                         draft = "",
+                                        hasDraftChat = false,
+                                        historySyncFailed = false,
                                         history = listOf(ChatMessage(ChatRole.USER, userText)),
                                         historyLoading = false,
                                         historyBusy = true,
@@ -416,12 +435,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val key = artifactPreviewKey(taskId, artifact.uri)
         val sourceRepo = repo
         val profileId = settings.profileId
-        if (_ui.value.artifactPreviews[key]?.error == null &&
-            key in _ui.value.artifactPreviews) return
+        val previous = _ui.value.artifactPreviews[key]
+        if (previous?.loading == true) return
         _ui.update { it.copy(artifactPreviews = it.artifactPreviews + (key to ArtifactPreview())) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { runCatching {
                 val context = getApplication<Application>()
+                // The public download may have been deleted while the in-memory preview stayed open.
+                if (previous?.localPath != null && java.io.File(previous.localPath).isFile && previous.publicUri != null &&
+                    runCatching { context.contentResolver.openFileDescriptor(Uri.parse(previous.publicUri), "r")
+                        ?.use { true } == true }.getOrDefault(false)) return@runCatching previous
                 val bytes = com.wear.wearbuddy.data.ArtifactDownloads.cachedBytes(context, profileId, key, artifact.name)
                     ?: sourceRepo.downloadArtifact(artifact, taskId)
                 val saved = com.wear.wearbuddy.data.ArtifactDownloads.save(context, profileId, key, artifact.name, artifact.mimeType, bytes)
@@ -459,46 +482,37 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun startHistoryWatcher(id: String) {
         historyJob?.cancel()
         historyJob = viewModelScope.launch {
-            refreshHistoryOnce(id)
+            var retryDelay = HISTORY_REFRESH_INTERVAL
             while (isActive && _ui.value.activeTaskId == id) {
-                delay(HISTORY_REFRESH_INTERVAL)
-                // Reuse the loaded stream; this also reconnects after a network drop.
-                refreshHistoryOnce(id)
+                if (foregroundNow) {
+                    val synced = refreshHistoryOnce(id)
+                    retryDelay = if (synced) HISTORY_REFRESH_INTERVAL else (retryDelay * 2).coerceAtMost(30_000L)
+                }
+                delay(retryDelay)
             }
         }
     }
 
-    private fun refreshHistory(id: String) {
-        viewModelScope.launch { refreshHistoryOnce(id) }
+    fun retryHistory() {
+        _ui.value.activeTaskId?.let { startHistoryWatcher(it) }
     }
 
-    private suspend fun refreshHistoryOnce(id: String) {
-        if (!settings.isLoggedIn) return
-        val result = withContext(Dispatchers.IO) { runCatching { repo.loadHistory(id) } }
-        result
-            .onSuccess { messages ->
-                _ui.update {
-                    if (it.activeTaskId != id) return@update it
-                    val current = it.tasks.firstOrNull { task -> task.id == id }
-                    it.copy(
-                        history = current?.messages?.takeIf { rows -> rows.isNotEmpty() }
-                            ?: messages.takeIf { rows -> rows.isNotEmpty() } ?: it.history,
-                        historyLoading = false,
-                        historyBusy = it.historyBusy && current?.status == TaskStatus.WORKING
-                    )
-                }
-            }
-            .onFailure { e ->
-                _ui.update {
-                    if (it.activeTaskId != id) return@update it
-                    it.copy(
-                        historyLoading = false,
-                        historyBusy = false,
-                        toast = e.message?.take(60) ?: "历史加载失败"
-                    )
-                }
-                clearToastLater()
-            }
+    private suspend fun refreshHistoryOnce(id: String): Boolean {
+        if (!settings.isLoggedIn) return false
+        val source = repo
+        val result = withContext(Dispatchers.IO) { runCatching { source.loadHistory(id) } }
+        _ui.update {
+            if (source !== repo || it.activeTaskId != id) return@update it
+            val current = it.activeTask
+            it.copy(
+                history = current?.messages?.takeIf { rows -> rows.isNotEmpty() }
+                    ?: result.getOrNull()?.takeIf { rows -> rows.isNotEmpty() } ?: it.history,
+                historyLoading = false,
+                historySyncFailed = result.isFailure,
+                historyBusy = it.historyBusy && current?.status == TaskStatus.WORKING
+            )
+        }
+        return result.isSuccess
     }
 
     private fun refreshCloudModel(id: String) {
@@ -562,7 +576,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update {
             it.copy(
                 selectedModel = id,
-                overlay = returnId?.let { overlayId -> Overlay.TaskDetail(overlayId) },
+                overlay = returnId?.let { overlayId -> Overlay.TaskDetail(overlayId) } ?: Overlay.NewChat,
                 modelPickerReturnId = null
             )
         }
@@ -1008,11 +1022,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(overlay = state.overlay.returnTo) }
             return
         }
-        val backTo = (state.overlay as? Overlay.ModelPicker)?.let { state.modelPickerReturnId }
-        if (backTo != null) {
-            // 从任务详情进来的模型选择：右滑返回详情而不是根页面
-            _ui.update { it.copy(overlay = Overlay.TaskDetail(backTo), modelPickerReturnId = null) }
-            startHistoryWatcher(backTo)
+        val parent = when (val child = state.overlay) {
+            Overlay.ModelPicker -> state.modelPickerReturnId?.let(Overlay::TaskDetail) ?: Overlay.NewChat
+            is Overlay.Compose -> child.taskId?.let(Overlay::TaskDetail) ?: Overlay.NewChat
+            else -> null
+        }
+        if (parent != null) {
+            _ui.update { it.copy(overlay = parent, modelPickerReturnId = null) }
+            if (parent is Overlay.TaskDetail) startHistoryWatcher(parent.id)
         } else {
             _ui.update {
                 it.copy(overlay = null, history = emptyList(), replyDraft = "", modelPickerReturnId = null)

@@ -56,10 +56,10 @@ fun ArtifactsScreen(actions: AppViewModel, modifier: Modifier = Modifier) {
     val listState = rememberTransformingLazyColumnState()
 
     val files = remember(state.tasks) {
-        val seen = HashSet<String>()
+        val seen = HashSet<Pair<String, String>>()
         state.tasks.flatMap { task ->
             task.result?.files.orEmpty().mapNotNull { file ->
-                if (seen.add(file.uri)) task.id to file else null
+                if (seen.add(task.id to file.uri)) task.id to file else null
             }
         }
     }
