@@ -68,9 +68,34 @@ class TaskPresentationTest {
         }
     }
 
-    @Test fun introductionTitleIsWhiteAndRemainsReachable() {
+    @Test fun thoughtsExpandWithAFullCardHighlight() {
+        val text = "正在整理工作区，确认文件路径。\n正在准备报告和摘要。\n正在核对最后一项结果。"
         compose.setContent { WearbuddyTheme { CompositionLocalProvider(LocalStrings provides stringsOf("zh")) {
-            AppScaffold { AboutScreen() }
+            Box(Modifier.padding(top = 50.dp, start = 16.dp, end = 16.dp)) {
+                MessageBubble(ChatMessage(ChatRole.THOUGHT, text), Modifier.testTag("thought"))
+            }
+        } } }
+        val card = compose.onNodeWithTag("thought")
+        val collapsed = card.getUnclippedBoundsInRoot()
+        assertTrue(collapsed.bottom - collapsed.top <= 52.dp)
+        compose.onNodeWithText(text).assertDoesNotExist()
+        val collapsedPixels = card.captureToImage().toPixelMap()
+        val collapsedColor = collapsedPixels[8, collapsedPixels.height / 2]
+        card.performClick()
+        compose.onNodeWithText(text).assertIsDisplayed()
+        val expandedPixels = card.captureToImage().toPixelMap()
+        val left = expandedPixels[8, expandedPixels.height / 2]
+        assertTrue("Expanded background should be brighter", left.red > collapsedColor.red)
+        assertEquals(left, expandedPixels[expandedPixels.width - 9, expandedPixels.height / 2])
+        saveScreenshot("thought-expanded.png")
+        card.performClick()
+        compose.onNodeWithText(text).assertDoesNotExist()
+    }
+
+    @Test fun aboutScreenShowsIntroductionAndCanGoBackFromTheBottom() {
+        var wentBack = false
+        compose.setContent { WearbuddyTheme { CompositionLocalProvider(LocalStrings provides stringsOf("zh")) {
+            AppScaffold { AboutScreen(onBack = { wentBack = true }) }
         } } }
         compose.onNode(hasScrollAction()).performScrollToNode(hasText("应用介绍"))
         val pixels = compose.onNodeWithText("应用介绍").captureToImage().toPixelMap()
@@ -81,6 +106,13 @@ class TaskPresentationTest {
         }
         assertTrue("The introduction heading should contain white glyphs", white > 10)
         saveScreenshot("about-introduction.png")
+        compose.onNode(hasScrollAction()).performScrollToNode(hasText("Oride"))
+        compose.onNodeWithText("Oride").assertIsDisplayed()
+        compose.onNodeWithText("开发者").assertIsDisplayed()
+        saveScreenshot("about-developer.png")
+        compose.onNode(hasScrollAction()).performTouchInput { swipeUp() }
+        compose.onNodeWithText("返回").assertIsDisplayed().performClick()
+        compose.runOnIdle { assertTrue(wentBack) }
     }
 
     @Test fun htmlWithoutAWebEngineOrBrowserDoesNotCrash() {

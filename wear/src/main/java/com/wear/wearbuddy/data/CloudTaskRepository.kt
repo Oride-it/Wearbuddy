@@ -135,6 +135,27 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
     override suspend fun loadHistory(id: String): List<ChatMessage> =
         withContext(Dispatchers.IO) { client.loadHistory(id) }
 
+    override suspend fun listWorkspaceDir(id: String, path: String): List<SandboxEntry> =
+        withContext(Dispatchers.IO) {
+            fun list(session: WorkBuddyCloudClient.Session): List<SandboxEntry> {
+                val endpoint = session.dataEndpoint?.takeIf { it.isNotBlank() }
+                    ?: throw IllegalStateException("会话缺少沙箱文件服务地址")
+                return SandboxFiles.listDir(endpoint, session.token, path)
+            }
+            fun refresh() = client.fetchSession(id).also { sessions[id] = it }
+
+            val cached = sessionOf(id)
+            if (cached.dataEndpoint.isNullOrBlank()) return@withContext list(refresh())
+            try {
+                list(cached)
+            } catch (e: SandboxFiles.ListFailure) {
+                if (e.status !in setOf(401, 403, 404)) throw e
+                val renewed = refresh()
+                if (renewed.dataEndpoint == cached.dataEndpoint && renewed.token == cached.token) throw e
+                list(renewed)
+            }
+        }
+
     override suspend fun listModels(): List<RemoteModel> =
         withContext(Dispatchers.IO) { client.listModels(settings.enterpriseId) }
 

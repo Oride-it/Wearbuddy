@@ -58,6 +58,7 @@ import com.wear.wearbuddy.presentation.screens.ModelPickerScreen
 import com.wear.wearbuddy.presentation.screens.SessionsScreen
 import com.wear.wearbuddy.presentation.screens.StorageScreen
 import com.wear.wearbuddy.presentation.screens.TaskDetailScreen
+import com.wear.wearbuddy.presentation.screens.WorkspaceScreen
 import com.wear.wearbuddy.presentation.theme.WearbuddyTheme
 import com.wear.wearbuddy.vm.AppViewModel
 import com.wear.wearbuddy.vm.CloudModule
@@ -194,7 +195,7 @@ private fun OverlayScreen(overlay: Overlay, active: Boolean, onSwipedAway: () ->
 
             Overlay.Accounts -> com.wear.wearbuddy.presentation.screens.AccountsScreen(viewModel, edgeModifier)
 
-            Overlay.About -> AboutScreen(edgeModifier)
+            Overlay.About -> AboutScreen(onBack = viewModel::closeOverlay, modifier = edgeModifier)
 
             Overlay.Storage -> StorageScreen(edgeModifier)
 
@@ -209,6 +210,8 @@ private fun OverlayScreen(overlay: Overlay, active: Boolean, onSwipedAway: () ->
             Overlay.GrowthPlan -> GrowthPlanScreen(viewModel, edgeModifier)
 
             Overlay.CloudTools -> CloudToolsScreen(viewModel, edgeModifier)
+
+            Overlay.Workspace -> WorkspaceScreen(viewModel, edgeModifier)
 
             is CloudModule -> CloudToolScreen(overlay.destination, viewModel, edgeModifier, overlay.entry)
         }

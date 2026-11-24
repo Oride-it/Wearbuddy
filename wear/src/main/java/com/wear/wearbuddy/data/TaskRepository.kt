@@ -42,6 +42,9 @@ interface TaskRepository {
 
     suspend fun loadHistory(id: String): List<ChatMessage> = emptyList()
 
+    /** 列出沙箱工作区某个目录下的文件与子目录；未登录返回空。 */
+    suspend fun listWorkspaceDir(id: String, path: String): List<SandboxEntry> = emptyList()
+
     suspend fun listModels(): List<RemoteModel> = emptyList()
 
     suspend fun remoteModel(id: String): String? = null

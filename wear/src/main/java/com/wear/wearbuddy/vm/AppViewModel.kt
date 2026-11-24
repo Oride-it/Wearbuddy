@@ -26,6 +26,7 @@ import com.wear.wearbuddy.data.Project
 import com.wear.wearbuddy.data.ProjectStore
 import com.wear.wearbuddy.data.RemoteAgent
 import com.wear.wearbuddy.data.RemoteModel
+import com.wear.wearbuddy.data.SandboxEntry
 import com.wear.wearbuddy.data.SessionExpiredException
 import com.wear.wearbuddy.data.Task
 import com.wear.wearbuddy.data.TaskRepository
@@ -57,6 +58,17 @@ data class ArtifactPreview(val loading: Boolean = true, val text: String? = null
 /** 输入页里待发送的附件（图片 / 文件），发送时才读取字节并上传云端。 */
 data class PendingAttachment(val name: String, val uri: String, val mimeType: String)
 
+/** 工作区目录浏览状态：当前路径 + 目录条目。 */
+data class WorkspaceState(
+    val taskId: String,
+    val path: String = "/workspace",
+    val entries: List<SandboxEntry> = emptyList(),
+    val loading: Boolean = false,
+    val error: String? = null,
+    /** 逐层记录进入的子目录，返回上一级时使用。 */
+    val stack: List<String> = emptyList()
+)
+
 /** 覆盖在三分页之上的子页面（进入新页面，不参与左右翻页）。 */
 sealed interface Overlay {
     data object NewChat : Overlay
@@ -74,6 +86,7 @@ sealed interface Overlay {
     data object Checkin : Overlay
     data object GrowthPlan : Overlay
     data object CloudTools : Overlay
+    data object Workspace : Overlay
 }
 
 internal data class CloudModule(
@@ -125,6 +138,8 @@ data class UiState(
     val historySyncFailed: Boolean = false,
     val historyBusy: Boolean = false,
     val artifactPreviews: Map<String, ArtifactPreview> = emptyMap(),
+    // 工作区目录浏览
+    val workspace: WorkspaceState? = null,
     // 项目
     val projects: List<Project> = emptyList(),
     // Agent 总览 / 每日签到
@@ -460,6 +475,70 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val preview = result.getOrElse { ArtifactPreview(loading = false, error = it.message ?: "文件加载失败") }
             if (settings.profileId != profileId) return@launch
             _ui.update { it.copy(artifactPreviews = it.artifactPreviews + (key to preview)) }
+        }
+    }
+
+    // ---------- 工作区目录浏览 ----------
+
+    /** 从任务详情打开工作区目录，默认从 /workspace 开始。 */
+    fun openWorkspaceBrowser() {
+        val id = _ui.value.activeTaskId ?: return
+        _ui.update {
+            it.copy(
+                overlay = Overlay.Workspace,
+                workspace = WorkspaceState(taskId = id, path = "/workspace", loading = true)
+            )
+        }
+        loadWorkspaceDir("/workspace", pushStack = false)
+    }
+
+    /** 打开子目录。 */
+    fun openWorkspaceChild(entry: SandboxEntry) {
+        val ws = _ui.value.workspace ?: return
+        val target = entry.path.trimEnd('/')
+        if (target == ws.path || !target.startsWith(ws.path)) return
+        loadWorkspaceDir(target, pushStack = true)
+    }
+
+    /** 返回上一级目录。 */
+    fun openWorkspaceParent() {
+        val ws = _ui.value.workspace ?: return
+        val parent = ws.stack.lastOrNull() ?: "/workspace"
+        val rest = ws.stack.dropLast(1)
+        loadWorkspaceDir(parent, pushStack = false, presetStack = rest)
+    }
+
+    fun retryWorkspaceDir() {
+        val ws = _ui.value.workspace ?: return
+        loadWorkspaceDir(ws.path, pushStack = false, presetStack = ws.stack)
+    }
+
+    private fun loadWorkspaceDir(path: String, pushStack: Boolean, presetStack: List<String>? = null) {
+        val current = _ui.value.workspace ?: return
+        val stack = when {
+            presetStack != null -> presetStack
+            pushStack -> current.stack + current.path
+            else -> current.stack
+        }
+        _ui.update {
+            it.copy(workspace = (it.workspace ?: current).copy(
+                path = path, entries = emptyList(), loading = true, error = null, stack = stack
+            ))
+        }
+        val taskId = current.taskId
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { repo.listWorkspaceDir(taskId, path) }
+            }
+            _ui.update { state ->
+                val ws = state.workspace
+                if (ws?.taskId != taskId || ws.path != path) state
+                else state.copy(workspace = ws.copy(
+                    entries = result.getOrElse { emptyList() },
+                    loading = false,
+                    error = result.exceptionOrNull()?.let { e -> e.message ?: e.javaClass.simpleName }
+                ))
+            }
         }
     }
 
@@ -1025,14 +1104,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val parent = when (val child = state.overlay) {
             Overlay.ModelPicker -> state.modelPickerReturnId?.let(Overlay::TaskDetail) ?: Overlay.NewChat
             is Overlay.Compose -> child.taskId?.let(Overlay::TaskDetail) ?: Overlay.NewChat
+            Overlay.Workspace -> state.workspace?.taskId?.let(Overlay::TaskDetail) ?: Overlay.NewChat
             else -> null
         }
         if (parent != null) {
-            _ui.update { it.copy(overlay = parent, modelPickerReturnId = null) }
+            _ui.update {
+                it.copy(
+                    overlay = parent,
+                    modelPickerReturnId = null,
+                    workspace = if (state.overlay is Overlay.Workspace) null else it.workspace
+                )
+            }
             if (parent is Overlay.TaskDetail) startHistoryWatcher(parent.id)
         } else {
             _ui.update {
-                it.copy(overlay = null, history = emptyList(), replyDraft = "", modelPickerReturnId = null)
+                it.copy(overlay = null, history = emptyList(), replyDraft = "", modelPickerReturnId = null,
+                    workspace = if (state.overlay is Overlay.Workspace) null else it.workspace)
             }
         }
     }

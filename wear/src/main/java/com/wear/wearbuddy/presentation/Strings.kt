@@ -42,6 +42,16 @@ interface LocalizedStrings {
     val artifactSaved: String
     val askPrompt: String
     val thoughtLabel: String
+    val expandThought: String
+    val collapseThought: String
+    // 云端产物 / 工作区
+    val cloudArtifacts: String
+    val browseWorkspace: String
+    val workspaceTitle: String
+    val workspaceEmpty: String
+    val workspaceLoadFailed: String
+    val workspaceParent: String
+    val workspaceUpLevel: String
     // 输入页（发消息）
     val composeTitle: String
     val messageLabel: String
@@ -132,6 +142,10 @@ interface LocalizedStrings {
     val aboutApp: String
     val appIntroTitle: String
     val appIntro: String
+    val appLicense: String
+    val sourceRepository: String
+    val developerList: String
+    val developerRole: String
     // 存储
     val storageTitle: String
     val storageCache: String
@@ -139,6 +153,7 @@ interface LocalizedStrings {
     val clearCache: String
     val cacheCleared: String
     // 通用
+    val back: String
     val cancel: String
     val loading: String
     val networkOffline: String
@@ -180,7 +195,16 @@ private object ZhStrings : LocalizedStrings {
     override val artifactTapToRetry = "点按重试"
     override val artifactSaved = "已保存到手表 Download"
     override val askPrompt = "云端需要你补充信息"
-    override val thoughtLabel = "思考"
+    override val thoughtLabel = "思考过程"
+    override val expandThought = "展开思考过程"
+    override val collapseThought = "收起思考过程"
+    override val cloudArtifacts = "云端产物"
+    override val browseWorkspace = "浏览工作区"
+    override val workspaceTitle = "工作区目录"
+    override val workspaceEmpty = "空目录"
+    override val workspaceLoadFailed = "目录读取失败"
+    override val workspaceParent = "上一级"
+    override val workspaceUpLevel = "已到顶层"
     override val composeTitle = "发消息"
     override val messageLabel = "消息"
     override val messageHint = "输入消息"
@@ -266,15 +290,18 @@ private object ZhStrings : LocalizedStrings {
     override val aboutApp = "关于 Wearbuddy"
     override val appIntroTitle = "应用介绍"
     override val appIntro =
-        "Wearbuddy 是 WorkBuddy 智能体的手表客户端。基于 Jetpack Compose Wear 与 " +
-            "Material 3 Expressive 构建，原生运行在 Wear OS 上。\n" +
-            "登录 WorkBuddy 账号后，可以在腕上直接下达云端任务、查看执行进度与完整对话、" +
-            "追问或中断，并把常用指令保存为项目一键运行。"
+        "Wearbuddy 是一个可独立运行在 Wear OS 手表上的 WorkBuddy 客户端。登录后，你可以在手表上发起云端任务、切换模型、查看进度并继续对话。\n\n" +
+            "你也可以浏览工作区、预览或下载任务生成的文件，把常用指令保存为项目，下次一键运行。"
+    override val appLicense = "本项目采用 MIT 开源许可证。"
+    override val sourceRepository = "项目地址"
+    override val developerList = "开发人员名单"
+    override val developerRole = "开发者"
     override val storageTitle = "存储空间"
     override val storageCache = "缓存"
     override val storageData = "数据"
     override val clearCache = "清除缓存"
     override val cacheCleared = "缓存已清除"
+    override val back = "返回"
     override val cancel = "取消"
     override val loading = "加载中…"
     override val networkOffline = "未连接云端"
@@ -316,7 +343,16 @@ private object EnStrings : LocalizedStrings {
     override val artifactTapToRetry = "Tap to retry"
     override val artifactSaved = "Saved in watch Download"
     override val askPrompt = "Cloud needs more info"
-    override val thoughtLabel = "Thinking"
+    override val thoughtLabel = "Thoughts"
+    override val expandThought = "Expand thoughts"
+    override val collapseThought = "Collapse thoughts"
+    override val cloudArtifacts = "Cloud files"
+    override val browseWorkspace = "Browse workspace"
+    override val workspaceTitle = "Workspace"
+    override val workspaceEmpty = "Empty folder"
+    override val workspaceLoadFailed = "Couldn't read folder"
+    override val workspaceParent = "Parent folder"
+    override val workspaceUpLevel = "Top level"
     override val composeTitle = "Send message"
     override val messageLabel = "Message"
     override val messageHint = "Enter message"
@@ -402,15 +438,18 @@ private object EnStrings : LocalizedStrings {
     override val aboutApp = "About Wearbuddy"
     override val appIntroTitle = "Introduction"
     override val appIntro =
-        "Wearbuddy is the watch client for WorkBuddy agents. Built with Jetpack Compose Wear " +
-            "and Material 3 Expressive, running natively on Wear OS.\n" +
-            "After signing in, dispatch cloud tasks from your wrist, follow progress and the full " +
-            "conversation, reply or cancel, and save frequent prompts as one-tap projects."
+        "Wearbuddy is a standalone WorkBuddy client for Wear OS. Sign in to start cloud tasks, switch models, follow progress, and keep the conversation going from your watch.\n\n" +
+            "Browse the workspace, preview or download task files, and save frequent prompts as projects you can run with one tap."
+    override val appLicense = "This project is released under the MIT License."
+    override val sourceRepository = "Source repository"
+    override val developerList = "Developers"
+    override val developerRole = "Developer"
     override val storageTitle = "Storage"
     override val storageCache = "Cache"
     override val storageData = "Data"
     override val clearCache = "Clear cache"
     override val cacheCleared = "Cache cleared"
+    override val back = "Back"
     override val cancel = "Cancel"
     override val loading = "Loading…"
     override val networkOffline = "Cloud offline"

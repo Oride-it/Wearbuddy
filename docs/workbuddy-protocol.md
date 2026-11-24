@@ -79,6 +79,7 @@ This corrects the earlier web-client assumptions above for artifact downloads:
 | --- | --- | --- |
 | Binary read | `GET {fileEndpoint}/files?path={encodeURIComponent(path)}` | closure `0x231095c`, path literal at `0x23109c8`, request builder call at `0x2310a24` |
 | Text read | Same file route | closure `0x2330e28`, path literal at `0x2330e94` |
+| Directory listing | `POST {fileEndpoint}/filesystem.Filesystem/ListDir` with a plain JSON body containing `path` and `depth: 1`; read response `entries` | procedure `0x257b974`, JSON media type and path at `0x257b9cc`–`0x257b9dc`, body fields at `0x257ba08`–`0x257ba30`, parser `0x165ae00` |
 | Auth | `X-Access-Token` set from session token; no fixed username appended by the reader | request builder `0x2312b38`, token assignment call `0x2312da4` |
 | Session aliases | `e2bDataEndpoint` / `sandboxDataLink`, `e2bEndpoint` / `sandboxLink` | parser `0x162ba64`, alias selection calls `0x162bd4c` and `0x162bda8` |
 | Derived endpoint | Replace host port prefix with `49983-`, retaining sandbox ID and domain; upgrade HTTP to HTTPS | `0xdfdd18`, tagged integer `0x1867e` (= 49983), regex pool entries `0x30e20`, `0x30e28`, `0x30f60`, `0x30f68`; HTTPS normalization `0xdfdab8` |
@@ -98,6 +99,10 @@ once after 401/403/404. It keeps COS presigning for object-storage attachments,
 but does not submit a known sandbox path as an object key after a gateway error.
 The bounded status retry is Wearbuddy recovery behavior, not a claim that the
 official app uses precisely the same retry policy.
+
+Directory browsing does not resend a successful empty JSON object using a
+streaming media type. The client treats omitted `entries` in an empty response
+object as an empty directory and accepts numeric and named file-type values.
 
 Local analysis output and disassembly are under `build/apk-analysis/` (ignored
 build artifacts). No extracted APK code or binaries are committed. No authenticated

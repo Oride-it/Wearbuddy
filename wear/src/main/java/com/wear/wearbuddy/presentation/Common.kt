@@ -1,38 +1,53 @@
 package com.wear.wearbuddy.presentation
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Input
-import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.Psychology
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -40,7 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.wear.compose.material3.Card
 import androidx.wear.compose.material3.CardDefaults
-import androidx.wear.compose.material3.FilledIconButton
+import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.FilledTonalIconButton
 import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.MaterialTheme
@@ -194,13 +209,10 @@ fun SettingRow(
     }
 }
 
-/**
- * 底部输入条：三个贴合圆屏的按钮｜左选模型｜中语音（主色）｜右打开「发消息」输入页。
- */
+/** 底部输入条：左侧选模型，右侧打开「发消息」输入页。 */
 @Composable
 fun InputBar(
     onModelClick: () -> Unit,
-    onVoiceClick: () -> Unit,
     onOpenInput: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true
@@ -209,7 +221,7 @@ fun InputBar(
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally)
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
     ) {
         FilledTonalIconButton(
             onClick = {
@@ -222,20 +234,6 @@ fun InputBar(
             Icon(
                 Icons.Rounded.SmartToy,
                 contentDescription = LocalStrings.current.modelPickerTitle,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-        FilledIconButton(
-            onClick = {
-                haptic()
-                onVoiceClick()
-            },
-            modifier = Modifier.size(42.dp),
-            enabled = enabled
-        ) {
-            Icon(
-                Icons.Rounded.Mic,
-                contentDescription = LocalStrings.current.voiceInput,
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -297,51 +295,26 @@ fun FieldInput(
     }
 }
 
-/** 对话消息使用灰色容器；思考和工具过程采用无边框的弱化样式。 */
+/**
+ * 对话消息：用户 / 助手正文使用灰色容器；思考过程和工具调用采用弱化样式。
+ * 工具调用条目学官方移动端：扳手图标 + 等宽命令 + 右侧执行状态。
+ */
 @Composable
 fun MessageBubble(
     message: ChatMessage,
-    modifier: Modifier = Modifier,
-    transformation: SurfaceTransformation? = null
+    modifier: Modifier = Modifier
 ) {
     val copy = rememberCopyText()
     when (message.role) {
-        ChatRole.THOUGHT, ChatRole.TOOL -> {
-            Card(
-                onClick = {},
-                onLongClick = { copy(message.text) },
-                onLongClickLabel = LocalStrings.current.copyTextLabel,
-                modifier = modifier.fillMaxWidth(),
-                transformation = transformation,
-                colors = CardDefaults.cardColors(
-                    containerColor = Color.Transparent,
-                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    if (message.role == ChatRole.TOOL) LocalStrings.current.statusExecuting
-                    else LocalStrings.current.thoughtLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    message.text,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontSize = 12.sp
-                )
-            }
-        }
-
+        ChatRole.THOUGHT -> ThoughtCard(message.text, copy, modifier)
+        ChatRole.TOOL -> ToolCallRow(message.text, copy, modifier)
         else -> {
             Card(
                 onClick = {},
                 onLongClick = { copy(message.text) },
                 onLongClickLabel = LocalStrings.current.copyTextLabel,
                 modifier = modifier.fillMaxWidth(),
-                transformation = transformation,
+                transformation = null,
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
                     contentColor = MaterialTheme.colorScheme.onSurface
@@ -353,6 +326,140 @@ fun MessageBubble(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+        }
+    }
+}
+
+/**
+ * 工具调用条目（学官方移动端的执行日志样式）：
+ * 左侧扳手图标，中间等宽字体的工具名 / 命令，右侧执行状态（✓ / ✕ / 转圈）。
+ */
+@Composable
+private fun ToolCallRow(
+    text: String,
+    copy: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val label = text.substringBefore('\n')
+    val mark = if (text.contains('\n')) text.substringAfter('\n') else ""
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = {},
+                onLongClickLabel = LocalStrings.current.copyTextLabel,
+                onLongClick = { copy(text) }
+            )
+            .padding(horizontal = 6.dp, vertical = 3.dp)
+    ) {
+        Icon(
+            Icons.Rounded.Build,
+            contentDescription = null,
+            modifier = Modifier.size(13.dp),
+            tint = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        when (mark) {
+            "✓" -> Icon(
+                Icons.Rounded.Check,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            "✕" -> Icon(
+                Icons.Rounded.Close,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = MaterialTheme.colorScheme.error
+            )
+            "…" -> CircularProgressIndicator(
+                modifier = Modifier.size(12.dp),
+                strokeWidth = 2.dp
+            )
+        }
+    }
+}
+
+/**
+ * 思考过程：可折叠卡片（默认收起，学官方移动端）。
+ * 标题行是「思考过程」+ 展开箭头，展开后显示灰色小字全文。
+ */
+@Composable
+private fun ThoughtCard(
+    text: String,
+    copy: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val s = LocalStrings.current
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val surface = MaterialTheme.colorScheme.surfaceContainer
+    val highlight = when {
+        pressed -> 0.15f
+        expanded -> 0.07f
+        else -> 0f
+    }
+    val background by animateColorAsState(Color.White.copy(alpha = highlight).compositeOver(surface))
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(background)
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = null,
+                role = Role.Button,
+                onClickLabel = if (expanded) s.collapseThought else s.expandThought,
+                onClick = { expanded = !expanded },
+                onLongClick = { copy(text) },
+                onLongClickLabel = s.copyTextLabel
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 32.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Rounded.Psychology,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                s.thoughtLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (expanded) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text.trim(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }

@@ -28,10 +28,10 @@ class ModelPickerScrollTest {
                 }
             }
         }
-        val list = compose.onNode(hasScrollAction())
+        val list = compose.onNode(hasScrollToIndexAction())
         list.performScrollToIndex(4)
         compose.waitForIdle()
-        // Reproduce the reported pause, including the former marquee's 1.5s start delay.
+        // Let the long labels begin moving before checking both scroll directions.
         Thread.sleep(1800)
         fun offset() = list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
         val pausedOffset = offset()
