@@ -2,6 +2,7 @@ package com.wear.wearbuddy.presentation
 
 import android.app.Application
 import androidx.compose.runtime.*
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.lifecycle.ViewModelStore
@@ -57,7 +58,7 @@ class ConversationFlowTest {
         }
     }
 
-    @Test fun newOutputPreservesReadingPositionAndButtonReachesLatestMessage() {
+    @Test fun newOutputPreservesReadingPositionAndArtifactsFollowTheLatestMessage() {
         val task = Task("test", "历史记录", TaskStatus.DONE, ExecEnv.CLOUD, 0, 0,
             result = TaskResult(emptyList(), listOf(Artifact("报告.txt", "artifact:report"))))
         val messages = (1..24).map { ChatMessage(ChatRole.ASSISTANT, "历史消息 $it") }
@@ -67,7 +68,7 @@ class ConversationFlowTest {
         owner.put("vm", vm)
         try {
             compose.setContent { WearbuddyTheme { AppScaffold { TaskDetailContent(state, vm) } } }
-            compose.onNodeWithText("报告.txt").assertIsDisplayed()
+            compose.onNodeWithText("报告.txt").assertDoesNotExist()
             compose.onNodeWithContentDescription("语音输入").assertDoesNotExist()
             compose.onNode(hasScrollAction()).performScrollToNode(hasText("历史消息 10"))
             val reader = compose.onNodeWithText("历史消息 10")
@@ -78,8 +79,13 @@ class ConversationFlowTest {
             reader.assertIsDisplayed()
             assertEquals(top, reader.getUnclippedBoundsInRoot().top)
             compose.onNodeWithContentDescription("回到底部").performClick()
-            compose.onNodeWithText("最新消息").assertIsDisplayed()
+            compose.onNodeWithText("报告.txt").assertIsDisplayed()
             compose.onNodeWithContentDescription("回到底部").assertDoesNotExist()
+            val list = compose.onNode(hasScrollAction())
+            val indexForKey = list.fetchSemanticsNode().config[SemanticsProperties.IndexForKey]
+            val latestMessageIndex = indexForKey("message:" + messages.size)
+            assertTrue(latestMessageIndex >= 0)
+            assertTrue(indexForKey("artifact:artifact:report") > latestMessageIndex)
         } finally { compose.runOnIdle { owner.clear() } }
     }
 }

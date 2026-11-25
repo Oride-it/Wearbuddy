@@ -1,8 +1,12 @@
 <resources>
 
+    <style name="WearbuddyActivityTheme" parent="@android:style/Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+
     <style name="MainActivityTheme.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@android:color/black</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
-        <item name="postSplashScreenTheme">@android:style/Theme.DeviceDefault</item>
+        <item name="postSplashScreenTheme">@style/WearbuddyActivityTheme</item>
     </style>
 </resources>

@@ -30,6 +30,10 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.wear.compose.foundation.lazy.*
 import androidx.wear.compose.material3.*
+import androidx.wear.compose.material3.lazy.ResponsiveTransformationSpec
+import androidx.wear.compose.material3.lazy.TransformationVariableSpec
+import androidx.wear.compose.material3.lazy.rememberTransformationSpec
+import androidx.wear.compose.material3.lazy.transformedHeight
 import com.wear.wearbuddy.data.CloudSettings
 import com.wear.wearbuddy.presentation.theme.WearbuddyTheme
 import kotlinx.coroutines.Dispatchers
@@ -72,15 +76,19 @@ private fun hasStorageAccess(context: Context): Boolean = if (Build.VERSION.SDK_
 private data class PickerEntry(val file: File, val label: String, val directory: Boolean)
 private data class FolderListing(val entries: List<PickerEntry>, val unreadable: Boolean)
 
+private val pickerRowTransformation = ResponsiveTransformationSpec.smallScreen(
+    minTransitionAreaHeightFraction = 0.50f,
+    maxTransitionAreaHeightFraction = 0.58f,
+    containerAlpha = TransformationVariableSpec(0.85f),
+    contentAlpha = TransformationVariableSpec(0.9f),
+    scale = TransformationVariableSpec(0.56f)
+)
+
 @Suppress("DEPRECATION")
 private fun listFolder(context: Context, folder: File?, imagesOnly: Boolean, zh: Boolean): FolderListing {
     val shared = Environment.getExternalStorageDirectory()
     val entries = mutableListOf<PickerEntry>()
     if (folder == null) {
-        val artifacts = File(context.filesDir, "artifacts")
-        if (artifacts.isDirectory || artifacts.mkdirs()) {
-            entries += PickerEntry(artifacts, if (zh) "应用内产物" else "App artifacts", true)
-        }
         context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)?.takeIf { it.isDirectory }?.let {
             entries += PickerEntry(it, if (zh) "应用下载" else "App downloads", true)
         }
@@ -99,6 +107,12 @@ private fun listFolder(context: Context, folder: File?, imagesOnly: Boolean, zh:
             PickerEntry(file, file.name, directory)
         } else null
     }.sortedWith(compareBy<PickerEntry> { !it.directory }.thenBy { it.label.lowercase() }.thenBy { it.label })
+    if (folder == null) {
+        val artifacts = File(context.filesDir, "artifacts")
+        if (artifacts.isDirectory || artifacts.mkdirs()) {
+            entries += PickerEntry(artifacts, if (zh) "应用内产物" else "App artifacts", true)
+        }
+    }
     return FolderListing(entries, unreadable = children == null)
 }
 
@@ -112,6 +126,7 @@ private fun LocalFilePicker(imagesOnly: Boolean, zh: Boolean, revision: Int, onC
     var settingsUnavailable by remember(revision, reload) { mutableStateOf(false) }
     val granted = remember(revision, reload) { hasStorageAccess(context) }
     val state = key(folder) { rememberTransformingLazyColumnState() }
+    val transformation = rememberTransformationSpec(pickerRowTransformation)
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { reload++ }
     val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { reload++ }
     val listing by key(folder, revision, reload) {
@@ -145,20 +160,30 @@ private fun LocalFilePicker(imagesOnly: Boolean, zh: Boolean, revision: Int, onC
         settingsUnavailable = true
     }
     BackHandler { goBack() }
-    ScreenScaffold(scrollState = state) { padding ->
+    ScreenScaffold(scrollState = state, contentPadding = PaddingValues(0.dp)) {
         TransformingLazyColumn(state = state, modifier = Modifier.fillMaxSize()
             .testTag(if (listing == null) "picker-loading" else "picker:${folder?.absolutePath.orEmpty()}"),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            contentPadding = padding + PaddingValues(horizontal = 12.dp, vertical = 28.dp)) {
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 26.dp, bottom = 36.dp)) {
             item { ListHeader { Text(if (imagesOnly) { if (zh) "选择图片" else "Choose image" } else { if (zh) "选择文件" else "Choose file" }) } }
             if (folder != null) {
                 item { Text(folder.absolutePath, style = MaterialTheme.typography.bodySmall) }
-                item { FilledTonalButton(onClick = ::goBack, modifier = Modifier.fillMaxWidth()) { Text(if (zh) "上一级" else "Up") } }
+                item {
+                    FilledTonalButton(
+                        onClick = ::goBack,
+                        modifier = Modifier.fillMaxWidth().transformedHeight(this, transformation),
+                        transformation = SurfaceTransformation(transformation)
+                    ) { Text(if (zh) "上一级" else "Up") }
+                }
             }
             if (!granted) {
-                item { FilledTonalButton(onClick = ::requestAccess, modifier = Modifier.fillMaxWidth()) {
-                    Text(if (zh) "授权浏览手表文件" else "Allow storage access")
-                } }
+                item {
+                    FilledTonalButton(
+                        onClick = ::requestAccess,
+                        modifier = Modifier.fillMaxWidth().transformedHeight(this, transformation),
+                        transformation = SurfaceTransformation(transformation)
+                    ) { Text(if (zh) "授权浏览手表文件" else "Allow storage access") }
+                }
                 if (settingsUnavailable) item { Text(if (zh) "手表未提供授权页面，仍可浏览可访问的文件夹。" else
                     "This watch has no storage permission screen. Accessible folders can still be opened.") }
             }
@@ -182,7 +207,8 @@ private fun LocalFilePicker(imagesOnly: Boolean, zh: Boolean, revision: Int, onC
                         if (uri != null) onSelect(uri)
                         else error = if (zh) "文件不可读取" else "File is not readable"
                     }
-                }, modifier = Modifier.fillMaxWidth(),
+                }, modifier = Modifier.fillMaxWidth().transformedHeight(this, transformation),
+                    transformation = SurfaceTransformation(transformation),
                     icon = { Icon(if (entry.directory) Icons.Rounded.Folder else Icons.Rounded.InsertDriveFile, contentDescription = null) },
                     label = { Text(entry.label, maxLines = 2) })
             }

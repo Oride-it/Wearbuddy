@@ -1,5 +1,6 @@
 package com.wear.wearbuddy.data
 
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -37,6 +38,27 @@ class AcpEventsTest {
         events.accept(chunk("user_message_chunk", "world"), false)
         events.accept(chunk("agent_message_chunk", "Hi"), false)
         assertEquals(listOf(ChatMessage(ChatRole.USER, "hello world"), ChatMessage(ChatRole.ASSISTANT, "Hi")), events.snapshot().messages)
+    }
+
+    @Test fun `reply language context is hidden from live and replayed user messages`() {
+        val text = "用 Kotlin 写个例子"
+        val blocks = JSONArray()
+            .put(JSONObject().put("type", "text").put("text", text))
+            .put(JSONObject().put("type", "text").put("text", "Reply in Chinese")
+                .put("_meta", JSONObject().put("codebuddy.ai/hiddenPromptContext", "reply-language")))
+        val message = chunk("user_message_chunk", text).apply {
+            getJSONObject("params").getJSONObject("update").put("content", blocks)
+        }
+
+        val replay = AcpEvents("task")
+        replay.accept(message, true)
+        val live = AcpEvents("task")
+        live.beginTurn(text)
+        live.accept(message, false)
+
+        val expected = listOf(ChatMessage(ChatRole.USER, text))
+        assertEquals(expected, replay.snapshot().messages)
+        assertEquals(expected, live.snapshot().messages)
     }
 
     @Test fun `repeated prompts on separate turns stay separate`() {

@@ -58,6 +58,7 @@ import androidx.wear.compose.material3.CardDefaults
 import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.FilledTonalIconButton
 import androidx.wear.compose.material3.Icon
+import androidx.wear.compose.material3.IconButtonDefaults
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.SurfaceTransformation
 import androidx.wear.compose.material3.Text
@@ -218,6 +219,8 @@ fun InputBar(
     enabled: Boolean = true
 ) {
     val haptic = rememberClickHaptic()
+    val buttonShapes = IconButtonDefaults.shapes(shape = RoundedCornerShape(percent = 50))
+    val buttonSize = Modifier.size(width = 58.dp, height = 48.dp)
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -228,7 +231,8 @@ fun InputBar(
                 haptic()
                 onModelClick()
             },
-            modifier = Modifier.size(42.dp),
+            modifier = buttonSize,
+            shapes = buttonShapes,
             enabled = enabled
         ) {
             Icon(
@@ -242,7 +246,12 @@ fun InputBar(
                 haptic()
                 onOpenInput()
             },
-            modifier = Modifier.size(42.dp),
+            modifier = buttonSize,
+            shapes = buttonShapes,
+            colors = IconButtonDefaults.filledTonalIconButtonColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ),
             enabled = enabled
         ) {
             Icon(

@@ -333,6 +333,14 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         if (sandboxPaths.isNotEmpty()) {
             blocks.put(sandboxPathBlock(sandboxPaths, model))
         }
+        val fallbackLanguage = if (settings.language == CloudSettings.LANG_EN) "English" else "Simplified Chinese"
+        blocks.put(hiddenPromptBlock(
+            "Reply in the language of the user's latest request. Use Chinese for a request written in Chinese, " +
+                "even if it contains English technical terms or the earlier conversation is in English. " +
+                "Follow any language explicitly requested by the user. If the request's language is unclear, use $fallbackLanguage.",
+            model,
+            "reply-language"
+        ))
 
         val meta = JSONObject()
             .put("conversationId", session.conversationId)
@@ -388,16 +396,13 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
             "以下附件已存放在沙箱本地路径，请直接读写这些路径。\n" +
             "$lines\n" +
             "</attachment_sandbox_paths>"
-        return JSONObject()
-            .put("type", "text")
-            .put("text", text)
-            .put(
-                "_meta",
-                JSONObject()
-                    .put("codebuddy.ai/hiddenPromptContext", "attachment-sandbox-paths")
-                    .put("codebuddy.ai", JSONObject().put("model", model))
-            )
+        return hiddenPromptBlock(text, model, "attachment-sandbox-paths")
     }
+
+    private fun hiddenPromptBlock(text: String, model: String, context: String): JSONObject =
+        textBlock(text, model).apply {
+            getJSONObject("_meta").put("codebuddy.ai/hiddenPromptContext", context)
+        }
 
     private fun legacyContentBlock(a: Artifact): JSONObject {
         val mime = a.mimeType.orEmpty()

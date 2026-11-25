@@ -146,51 +146,6 @@ internal fun TaskDetailContent(state: com.wear.wearbuddy.vm.UiState, actions: Ap
                     label = { Text(s.historyUnavailable) }, secondaryLabel = { Text(s.retry) })
             }
 
-            // 云端产物（学官方移动端：放在消息之前，标题带数量与文件夹图标）
-            val artifactFiles = task.result?.files.orEmpty()
-            item(key = "artifacts-header") {
-                ListHeader {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Rounded.Folder,
-                            contentDescription = null,
-                            modifier = Modifier.size(15.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            if (artifactFiles.isEmpty()) s.cloudArtifacts
-                            else s.cloudArtifacts + " · " + artifactFiles.size
-                        )
-                    }
-                }
-            }
-            if (artifactFiles.isNotEmpty()) {
-                items(artifactFiles, key = { "artifact:" + it.uri }) { file ->
-                    ArtifactRow(actions, task.id, file,
-                        state.artifactPreviews[com.wear.wearbuddy.vm.artifactPreviewKey(task.id, file.uri)],
-                        Modifier.fillMaxWidth())
-                }
-            }
-            item(key = "browse-workspace") {
-                FilledTonalButton(
-                    onClick = {
-                        haptic()
-                        actions.openWorkspaceBrowser()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    transformation = null
-                ) {
-                    Icon(
-                        Icons.Rounded.FolderOpen,
-                        contentDescription = null,
-                        modifier = Modifier.size(ButtonDefaults.IconSize)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(s.browseWorkspace, maxLines = 1)
-                }
-            }
-
             task.error?.let { err ->
                 item {
                     Card(
@@ -336,13 +291,54 @@ internal fun TaskDetailContent(state: com.wear.wearbuddy.vm.UiState, actions: Ap
                     else -> Unit
                 }
             }
+
+            val artifactFiles = task.result?.files.orEmpty()
+            if (artifactFiles.isNotEmpty()) {
+                item(key = "artifacts-header") {
+                    ListHeader {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Rounded.Folder,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(s.cloudArtifacts + " · " + artifactFiles.size)
+                        }
+                    }
+                }
+                items(artifactFiles, key = { "artifact:" + it.uri }) { file ->
+                    ArtifactRow(actions, task.id, file,
+                        state.artifactPreviews[com.wear.wearbuddy.vm.artifactPreviewKey(task.id, file.uri)],
+                        Modifier.fillMaxWidth())
+                }
+            }
+            item(key = "browse-workspace") {
+                FilledTonalButton(
+                    onClick = {
+                        haptic()
+                        actions.openWorkspaceBrowser()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    transformation = null
+                ) {
+                    Icon(
+                        Icons.Rounded.FolderOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(ButtonDefaults.IconSize)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(s.browseWorkspace, maxLines = 1)
+                }
+            }
             item(key = "bottom") { Spacer(Modifier.height(1.dp)) }
         }
         if (listState.canScrollForward) {
             FilledTonalIconButton(onClick = {
                 scope.launch { listState.scrollToItem((listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)) }
             }, modifier = Modifier.align(Alignment.BottomEnd)
-                .padding(end = 15.dp, bottom = ChatControlsBottomInset + 50.dp)
+                .padding(end = 15.dp, bottom = ChatControlsBottomInset + 54.dp)
                 .size(32.dp)) {
                 Icon(Icons.Rounded.ArrowDownward, contentDescription = s.jumpToBottom, modifier = Modifier.size(18.dp))
             }

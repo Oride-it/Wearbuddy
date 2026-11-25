@@ -107,7 +107,7 @@ internal class AcpEvents(private val sessionId: String, private val conversation
         if (role != null) {
             val content = update.opt("content")
             collectLinks(content)
-            val text = textOf(content)
+            val text = textOf(content, hidePromptContext = role == ChatRole.USER)
             if (role == ChatRole.USER && expectedUserEcho != null) {
                 val remaining = expectedUserEcho!!
                 if (remaining.startsWith(text)) {
@@ -194,11 +194,15 @@ internal class AcpEvents(private val sessionId: String, private val conversation
         downloadUrl = o.optString("url").ifBlank { o.optString("download_url") }.takeIf { it.isNotBlank() }
     )
 
-    private fun textOf(node: Any?): String = when (node) {
+    private fun textOf(node: Any?, hidePromptContext: Boolean): String = when (node) {
         is String -> node
-        is JSONObject -> if (node.optString("type") in setOf("image", "resource_link", "resource")) ""
-            else if (node.has("text")) node.optString("text") else textOf(node.opt("content"))
-        is JSONArray -> (0 until node.length()).joinToString("") { textOf(node.opt(it)) }
+        is JSONObject -> when {
+            hidePromptContext && node.optJSONObject("_meta")?.has("codebuddy.ai/hiddenPromptContext") == true -> ""
+            node.optString("type") in setOf("image", "resource_link", "resource") -> ""
+            node.has("text") -> node.optString("text")
+            else -> textOf(node.opt("content"), hidePromptContext)
+        }
+        is JSONArray -> (0 until node.length()).joinToString("") { textOf(node.opt(it), hidePromptContext) }
         else -> ""
     }
 }
