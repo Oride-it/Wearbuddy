@@ -15,17 +15,6 @@ data class Artifact(
     val downloadUrl: String? = null
 )
 
-/** askuser 的一个可选项。 */
-data class AskOption(val label: String, val description: String? = null)
-
-/** 云端执行中抛给手表的问题。 */
-data class AskQuestion(
-    val question: String,
-    val header: String? = null,
-    val options: List<AskOption> = emptyList(),
-    val requestId: String? = null
-)
-
 data class TaskResult(
     val points: List<String>,
     val files: List<Artifact> = emptyList()

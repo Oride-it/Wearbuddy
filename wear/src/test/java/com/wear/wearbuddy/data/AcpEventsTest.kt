@@ -6,6 +6,66 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AcpEventsTest {
+    @Test fun `questions preserve option values and use per-question answer types`() {
+        val ask = parseAsk(JSONObject("""
+            {"toolCallId":"tool-1","schema":{"questions":[
+                {"id":"format","question":"Format?","options":[{"label":"Markdown","value":"md"}]},
+                {"question":"Extras?","multiSelect":true,"options":["Summary","Details"]},
+                {"question":"Anything else?"}
+            ]}}
+        """), rpcId = "rpc-1")!!
+        val picks = mapOf(
+            "format" to AskPick(listOf(ask.items.first().options.single())),
+            "q-1" to AskPick(ask.items[1].options, custom = "Appendix")
+        )
+        assertEquals("tool-1", ask.requestId)
+        assertEquals("rpc-1", ask.rpcId)
+        val outcome = ask.rpcOutcome(picks).getJSONObject("outcome")
+        assertEquals("submitted", outcome.getString("outcome"))
+        val answers = outcome.getJSONObject("data").getJSONObject("answers")
+        assertEquals("md", answers.getString("format"))
+        assertEquals("""["Summary","Details","Appendix"]""", answers.getJSONArray("q-1").toString())
+        assertFalse(answers.has("q-2"))
+        assertEquals("cancelled", ask.rpcOutcome(null).getJSONObject("outcome").getString("outcome"))
+    }
+
+    @Test fun `permission questions can have options without question text or tool id`() {
+        val ask = parseAsk(JSONObject("""
+            {"options":[{"name":"Allow","kind":"allow_once","optionId":"allow-7"}]}
+        """), rpcId = 27, permission = true)!!
+        assertNull(ask.requestId)
+        assertEquals(27, ask.rpcId)
+        val picks = mapOf("q-0" to AskPick(ask.items.single().options))
+        val outcome = ask.rpcOutcome(picks).getJSONObject("outcome")
+        assertEquals("selected", outcome.getString("outcome"))
+        assertEquals("allow-7", outcome.getString("optionId"))
+    }
+
+    @Test fun `replayed tool questions do not open a card and live duplicates cannot reopen an answered card`() {
+        val event = JSONObject("""
+            {"method":"session/update","params":{"update":{
+                "sessionUpdate":"tool_call","toolCallId":"tool-1","toolName":"AskUserQuestion",
+                "status":"pending","rawInput":{"questions":[{"question":"Format?","options":["Markdown"]}]}
+            }}}
+        """)
+        val replay = AcpEvents("task")
+        replay.accept(event, replaying = true)
+        assertNull(replay.snapshot().ask)
+
+        val live = AcpEvents("task")
+        live.beginTurn("Write a report")
+        assertTrue(live.accept(event, replaying = false))
+        assertEquals(TaskStatus.BLOCKED, live.snapshot().status)
+        val ask = live.snapshot().ask!!
+        live.accept(status("running"), replaying = false)
+        assertEquals(TaskStatus.BLOCKED, live.snapshot().status)
+        live.resolveAsk(ask, "Markdown")
+        assertEquals(ChatMessage(ChatRole.USER, "Markdown"), live.snapshot().messages.last())
+        assertFalse(live.accept(event, replaying = false))
+        assertNull(live.snapshot().ask)
+        assertEquals(TaskStatus.WORKING, live.snapshot().status)
+    }
+
     private fun chunk(kind: String, text: String, id: String = "task") = JSONObject()
         .put("method", "session/update")
         .put("params", JSONObject().put("sessionId", id).put("update", JSONObject()

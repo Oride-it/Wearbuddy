@@ -28,7 +28,8 @@ internal data class AcpSnapshot(
     val messages: List<ChatMessage>,
     val files: List<Artifact>,
     val status: TaskStatus? = null,
-    val error: String? = null
+    val error: String? = null,
+    val ask: AskQuestion? = null
 )
 
 /** A reducer shared by history replay and the live stream; never exposes mutable buffers. */
@@ -37,15 +38,23 @@ internal class AcpEvents(private val sessionId: String, private val conversation
     private val files = linkedMapOf<String, Artifact>()
     private var status: TaskStatus? = null
     private var error: String? = null
+    private var ask: AskQuestion? = null
+    private val resolvedAsks = mutableSetOf<String>()
+    private val answeredRpcIds = mutableSetOf<Any>()
     private var boundary = true
     private var expectedUserEcho: String? = null
     private val toolIndices = mutableMapOf<String, Int>()
 
-    @Synchronized fun snapshot() = AcpSnapshot(messages.toList(), files.values.toList(), status, error)
+    @Synchronized fun snapshot() = AcpSnapshot(
+        messages.toList(), files.values.toList(), status, error, ask
+    )
 
     @Synchronized fun beginTurn(text: String) {
         status = TaskStatus.WORKING
         error = null
+        ask = null
+        resolvedAsks.clear()
+        answeredRpcIds.clear()
         messages += ChatMessage(ChatRole.USER, text)
         expectedUserEcho = text
         boundary = true
@@ -64,7 +73,41 @@ internal class AcpEvents(private val sessionId: String, private val conversation
                 else -> TaskStatus.DONE
             }
         }
+        if (status in setOf(TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.STOPPED)) ask = null
         boundary = true
+    }
+
+    @Synchronized fun showAsk(question: AskQuestion): Boolean {
+        if (question.requestId in resolvedAsks || question.rpcId in answeredRpcIds) return false
+        if (ask?.rpcId != null && question.rpcId == null) return false
+        ask = question
+        status = TaskStatus.BLOCKED
+        boundary = true
+        return true
+    }
+
+    @Synchronized fun resolveAsk(question: AskQuestion, answer: String, messageIndex: Int = messages.size) {
+        question.requestId?.let(resolvedAsks::add)
+        question.rpcId?.let(answeredRpcIds::add)
+        if (ask == question) ask = null
+        if (ask == null && status == TaskStatus.BLOCKED) status = TaskStatus.WORKING
+        if (answer.isNotBlank()) {
+            val index = messageIndex.coerceAtMost(messages.size)
+            if (index == messages.size) boundary = true
+            messages.add(index, ChatMessage(ChatRole.USER, answer))
+            toolIndices.replaceAll { _, position -> if (position >= index) position + 1 else position }
+        }
+    }
+
+    private fun updateStatus(next: TaskStatus?) {
+        when (next) {
+            TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.STOPPED -> {
+                ask = null
+                status = next
+            }
+            null -> Unit
+            else -> if (ask == null) status = next
+        }
     }
 
     @Synchronized fun accept(root: JSONObject, replaying: Boolean): Boolean {
@@ -80,6 +123,7 @@ internal class AcpEvents(private val sessionId: String, private val conversation
             if (!replaying) finishTurn(JSONObject().put("stopReason", params.optString("stopReason").ifBlank { "end_turn" }))
             return true
         }
+        if (method == ACP_QUESTION) return !replaying && parseAsk(params)?.let(::showAsk) == true
         if (method == "_codebuddy.ai/artifact") {
             val artifact = params.optJSONObject("artifact") ?: return false
             val uri = artifact.optString("uri")
@@ -130,13 +174,13 @@ internal class AcpEvents(private val sessionId: String, private val conversation
             val state = meta?.optString("codebuddy.ai/status")?.takeIf { it.isNotBlank() }
                 ?: cb?.optString("status")
             if (!history && meta?.optBoolean("codebuddy.ai/isSnapshot") != true && cb?.optBoolean("isSnapshot") != true) {
-                status = state?.let(TaskStates::parse) ?: status
+                updateStatus(state?.let(TaskStates::parse))
             }
             if (state == "completed") boundary = true
             return true
         }
         if (kind == "state_update") {
-            if (!history) status = TaskStates.parse(update.optString("currentState")) ?: status
+            if (!history) updateStatus(TaskStates.parse(update.optString("currentState")))
             boundary = true
             return true
         }
@@ -145,11 +189,21 @@ internal class AcpEvents(private val sessionId: String, private val conversation
             collectLinks(update.opt("content"))
             val id = update.optString("toolCallId")
             val title = update.optString("title").ifBlank { update.optString("toolName") }
+            val toolStatus = update.optString("status")
+            val toolName = update.optString("toolName").ifBlank { update.optString("name") }.ifBlank { title }
+            val finished = toolStatus in setOf("completed", "failed", "executed", "cancelled", "canceled")
+            if (!history && toolName.filter(Char::isLetterOrDigit).equals("AskUserQuestion", ignoreCase = true) && !finished) {
+                val input = update.optJSONObject("rawInput") ?: update.optJSONObject("args")
+                val question = input?.let { parseAsk(it) }
+                if (question != null) return showAsk(question.copy(requestId = id.ifBlank { question.requestId }))
+            }
+            if (!history && finished && id.isNotBlank() && ask?.requestId == id) {
+                ask?.let { resolveAsk(it, "") }
+            }
             val index = toolIndices[id]
             val previous = index?.let { messages[it].text.substringBefore('\n') }
             if (title.isNotBlank() || previous != null) {
                 val label = title.ifBlank { previous.orEmpty() }
-                val toolStatus = update.optString("status")
                 val indicator = when (toolStatus) {
                     "completed" -> "✓"
                     "failed" -> "✕"

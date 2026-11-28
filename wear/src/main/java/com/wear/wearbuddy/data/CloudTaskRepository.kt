@@ -36,6 +36,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
     private val sessions = ConcurrentHashMap<String, WorkBuddyCloudClient.Session>()
 
     private val serverModels = ConcurrentHashMap<String, String>()
+    private val handledAsks = ConcurrentHashMap<String, AskQuestion>()
 
     private val stoppedIds = ConcurrentHashMap.newKeySet<String>().apply { addAll(settings.stoppedSessions) }
 
@@ -65,6 +66,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
                 task.copy(
                     messages = snapshot.messages,
                     status = status,
+                    ask = if (status == TaskStatus.BLOCKED) snapshot.ask ?: task.ask else null,
                     error = snapshot.error ?: task.error?.takeIf { status == TaskStatus.FAILED },
                     unread = task.unread || (status != task.status && status == TaskStatus.DONE),
                     result = mergeResult(task.result, snapshot.files)
@@ -100,6 +102,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
         }
 
     override suspend fun reply(id: String, prompt: String, attachments: List<Artifact>) = withContext(Dispatchers.IO) {
+        handledAsks.remove(id)
         setStopped(id, false)
         updateTask(id) { it.copy(status = TaskStatus.WORKING, error = null, ask = null) }
         startPolling(id)
@@ -110,20 +113,21 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
         }
     }
 
-    override suspend fun answerAsk(id: String, answer: String) = withContext(Dispatchers.IO) {
-        val task = _tasks.value.firstOrNull { it.id == id } ?: return@withContext
-        val ask = task.ask
-        updateTask(id) { it.copy(status = TaskStatus.WORKING, ask = null, unread = false, error = null) }
-        startPolling(id)
-        deliver(id) {
-            val session = sessionOf(id)
-            applyModel(id, session)
-            if (ask?.requestId != null) {
-                client.resolveInterruption(session, ask, answer)
-            } else {
-                client.sendPrompt(session, answer)
-            }
+    override suspend fun answerAsk(id: String, ask: AskQuestion, picks: Map<String, AskPick>?) = withContext(Dispatchers.IO) {
+        check(_tasks.value.firstOrNull { it.id == id }?.ask == ask) { "这条提问已更新" }
+        client.resolveInterruption(sessionOf(id), ask, picks)
+        handledAsks[id] = ask
+        val stopped = picks == null && ask.rpcId == null
+        if (stopped) setStopped(id, true)
+        updateTask(id) { task ->
+            if (task.ask == ask) task.copy(
+                status = if (stopped) TaskStatus.STOPPED else TaskStatus.WORKING,
+                ask = null, unread = false, error = null
+            )
+            else if (stopped && task.status == TaskStatus.WORKING) task.copy(status = TaskStatus.STOPPED)
+            else task
         }
+        startPolling(id)
     }
 
     override suspend fun uploadAttachment(name: String, mimeType: String, bytes: ByteArray): Artifact =
@@ -169,6 +173,13 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
             current + matches.filter { known.add(it.id) }.map { it.toTask(ExecEnv.CLOUD) }
         }
         matches.map { it.id }
+    }
+
+    internal suspend fun ensureConversation(id: String): Boolean = withContext(Dispatchers.IO) {
+        if (_tasks.value.any { it.id == id }) return@withContext true
+        val task = client.getConversation(id)?.toTask(ExecEnv.CLOUD) ?: return@withContext false
+        _tasks.update { list -> if (list.any { it.id == id }) list else list + task }
+        true
     }
 
     suspend fun renameSession(id: String, title: String) = withContext(Dispatchers.IO) {
@@ -222,6 +233,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
     }
 
     override suspend fun retry(id: String) = withContext(Dispatchers.IO) {
+        handledAsks.remove(id)
         val prompt = _tasks.value.firstOrNull { it.id == id }?.title.orEmpty()
         setStopped(id, false)
         updateTask(id) { it.copy(status = TaskStatus.WORKING, error = null) }
@@ -312,9 +324,8 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
         runCatching { client.listConversations() }
             .onSuccess { remote ->
                 markHealthy()
-                val mapped = remote.map { it.toTask(ExecEnv.CLOUD) }
-                if (mapped.isNotEmpty()) {
-                    _tasks.update { local -> merge(local, mapped) }
+                if (remote.isNotEmpty()) {
+                    _tasks.update { local -> merge(local, remote) }
                 }
                 _tasks.value
                     .filter { it.status == TaskStatus.WORKING && !pollers.containsKey(it.id) }
@@ -375,7 +386,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
                 }
                 val stream = client.streamSnapshot(id)?.takeIf { client.hasLink(id) }
                 val polledStatus = remote.status.toTaskStatusOrNull()
-                val remoteStatus = TaskStates.resolve(polledStatus, stream?.status, id in stoppedIds)
+                val remoteStatus = reconciledStatus(id, polledStatus, stream, remote.ask)
                 if (remoteStatus == TaskStatus.WORKING) remote.session?.let { sessions[id] = it }
                 updateTask(id) { t ->
                     val status = remoteStatus?.takeUnless {
@@ -387,7 +398,7 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
                         error = if (status == TaskStatus.FAILED) (t.error ?: "云端执行失败") else t.error,
                         unread = status == TaskStatus.DONE || status == TaskStatus.FAILED ||
                             (status == TaskStatus.BLOCKED && t.ask == null),
-                        ask = if (status == TaskStatus.BLOCKED) (remote.ask ?: t.ask) else null,
+                        ask = if (status == TaskStatus.BLOCKED) (stream?.ask ?: remote.ask ?: t.ask) else null,
                         result = if (status == TaskStatus.DONE) cloudResult(remote, t.result)
                             else mergeResult(t.result, remote.artifacts)
                     )
@@ -436,15 +447,36 @@ class CloudTaskRepository(private val settings: CloudSettings) : TaskRepository 
         _tasks.update { list -> list.map { if (it.id == id) transform(it) else it } }
     }
 
-    private fun merge(local: List<Task>, remote: List<Task>): List<Task> {
+    private fun reconciledStatus(
+        id: String,
+        remoteStatus: TaskStatus?,
+        stream: AcpSnapshot?,
+        remoteAsk: AskQuestion?,
+        stopped: Boolean = id in stoppedIds
+    ): TaskStatus? {
+        if (stopped) return TaskStatus.STOPPED
+        if (stream?.ask != null) return TaskStatus.BLOCKED
+        val handled = handledAsks[id]
+        val stillHandled = handled != null &&
+            (remoteAsk?.requestId == null || remoteAsk.requestId == handled.requestId)
+        val status = if (remoteStatus == TaskStatus.BLOCKED && stillHandled) TaskStatus.WORKING else remoteStatus
+        return TaskStates.resolve(status, stream?.status)
+    }
+
+    private fun merge(local: List<Task>, remote: List<WorkBuddyCloudClient.RemoteConversation>): List<Task> {
         val remoteIds = remote.map { it.id }.toSet()
         val localById = local.associateBy { it.id }
-        val merged = remote.map { r ->
+        val merged = remote.map { conversation ->
+            val r = conversation.toTask(ExecEnv.CLOUD)
             val l = localById[r.id] ?: return@map r
-            val keepStopped = (l.status == TaskStatus.STOPPED || stoppedIds.contains(r.id)) &&
-                r.status == TaskStatus.WORKING
+            val remoteStatus = TaskStates.parse(conversation.status)
+            val keepStopped = r.id in stoppedIds || (l.status == TaskStatus.STOPPED && remoteStatus == TaskStatus.WORKING)
+            val stream = client.streamSnapshot(r.id)
+            val status = reconciledStatus(r.id, remoteStatus, stream, r.ask, keepStopped)
+                ?: l.status
             r.copy(
-                status = TaskStates.resolve(r.status, client.streamSnapshot(r.id)?.status, keepStopped) ?: r.status,
+                status = status,
+                ask = if (status == TaskStatus.BLOCKED) stream?.ask ?: r.ask ?: l.ask else null,
                 result = r.result ?: l.result,
                 messages = l.messages,
                 unread = if (keepStopped) false else r.unread

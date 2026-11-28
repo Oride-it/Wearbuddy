@@ -18,7 +18,9 @@ interface LocalizedStrings {
     val connectFirst: String
     val startChat: String
     val emptyChatHint: String
-    val jumpToBottom: String
+    val jumpToLatest: String
+    val taskCompleteNotifications: String
+    val taskCompleted: String
     val historyUnavailable: String
     val emptyTasks: String
     val notLoggedInHint: String
@@ -41,6 +43,14 @@ interface LocalizedStrings {
     val artifactTapToRetry: String
     val artifactSaved: String
     val askPrompt: String
+    val askPermission: String
+    val askConfirm: String
+    val askOther: String
+    val askAnswerHint: String
+    val askAllowOnce: String
+    val askAllowAlways: String
+    val askRejectOnce: String
+    val askRejectAlways: String
     val thoughtLabel: String
     val expandThought: String
     val collapseThought: String
@@ -173,7 +183,9 @@ private object ZhStrings : LocalizedStrings {
     override val connectFirst = "先连接模型服务"
     override val startChat = "发送第一条消息"
     override val emptyChatHint = "点击上方新对话，开始第一段对话。"
-    override val jumpToBottom = "回到底部"
+    override val jumpToLatest = "回到最新消息"
+    override val taskCompleteNotifications = "任务完成通知"
+    override val taskCompleted = "任务已完成"
     override val historyUnavailable = "会话暂未同步，正在重连"
     override val notLoggedInHint = "登录后即可下发云端任务"
     override val loginNow = "立即登录"
@@ -195,6 +207,14 @@ private object ZhStrings : LocalizedStrings {
     override val artifactTapToRetry = "点按重试"
     override val artifactSaved = "已保存到手表 Download"
     override val askPrompt = "云端需要你补充信息"
+    override val askPermission = "云端请求你的许可"
+    override val askConfirm = "确认"
+    override val askOther = "其他"
+    override val askAnswerHint = "输入答案"
+    override val askAllowOnce = "允许一次"
+    override val askAllowAlways = "总是允许"
+    override val askRejectOnce = "拒绝一次"
+    override val askRejectAlways = "总是拒绝"
     override val thoughtLabel = "思考过程"
     override val expandThought = "展开思考过程"
     override val collapseThought = "收起思考过程"
@@ -321,7 +341,9 @@ private object EnStrings : LocalizedStrings {
     override val connectFirst = "Connect your account first"
     override val startChat = "Send your first message"
     override val emptyChatHint = "Tap New chat above to start your first conversation."
-    override val jumpToBottom = "Jump to bottom"
+    override val jumpToLatest = "Jump to latest message"
+    override val taskCompleteNotifications = "Task completion notifications"
+    override val taskCompleted = "Task completed"
     override val historyUnavailable = "Chat not synced. Reconnecting…"
     override val notLoggedInHint = "Sign in to dispatch cloud tasks"
     override val loginNow = "Sign in"
@@ -343,6 +365,14 @@ private object EnStrings : LocalizedStrings {
     override val artifactTapToRetry = "Tap to retry"
     override val artifactSaved = "Saved in watch Download"
     override val askPrompt = "Cloud needs more info"
+    override val askPermission = "Cloud needs your permission"
+    override val askConfirm = "Confirm"
+    override val askOther = "Other"
+    override val askAnswerHint = "Enter an answer"
+    override val askAllowOnce = "Allow once"
+    override val askAllowAlways = "Always allow"
+    override val askRejectOnce = "Reject once"
+    override val askRejectAlways = "Always reject"
     override val thoughtLabel = "Thoughts"
     override val expandThought = "Expand thoughts"
     override val collapseThought = "Collapse thoughts"

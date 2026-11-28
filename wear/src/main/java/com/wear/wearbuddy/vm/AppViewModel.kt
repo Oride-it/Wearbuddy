@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.wear.wearbuddy.data.ChatMessage
 import com.wear.wearbuddy.data.ChatRole
 import com.wear.wearbuddy.data.Artifact
+import com.wear.wearbuddy.data.AskPick
+import com.wear.wearbuddy.data.AskQuestion
 import com.wear.wearbuddy.data.CheckinInfo
 import com.wear.wearbuddy.data.CloudSettings
 import com.wear.wearbuddy.data.CloudCommand
@@ -33,6 +35,8 @@ import com.wear.wearbuddy.data.TaskRepository
 import com.wear.wearbuddy.data.TaskStatus
 import com.wear.wearbuddy.data.UsageSnapshot
 import com.wear.wearbuddy.data.WorkBuddyCloudClient
+import com.wear.wearbuddy.presentation.TaskNotifications
+import com.wear.wearbuddy.presentation.stringsOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelChildren
@@ -204,6 +208,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var loginFlow: NativeLogin? = null
 
     private val speech = SpeechManager(app)
+    private val notifications = TaskNotifications(app)
 
     init {
         bindRepo()
@@ -270,6 +275,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val prev = prevStatus
         list.forEach { t ->
             val before = prev[t.id]
+            if ((before == TaskStatus.WORKING || before == TaskStatus.BLOCKED) && t.status == TaskStatus.DONE) {
+                notifications.show(settings.profileId, t.id, t.title, settings.language)
+            }
             if (before != null && before != t.status && t.id == _ui.value.activeTaskId) {
                 if (t.status == TaskStatus.DONE && _ui.value.ttsEnabled) {
                     speakTaskResult(t)
@@ -345,6 +353,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         repo.markRead(id)
         startHistoryWatcher(id)
         refreshCloudModel(id)
+    }
+
+    internal fun openCompletedTask(profileId: String, taskId: String) {
+        if (profileId != settings.profileId) switchAccount(profileId)
+        if (profileId != settings.profileId) return
+        if (!settings.isLoggedIn) {
+            openLogin()
+            return
+        }
+        val source = repo as? CloudTaskRepository ?: return
+        viewModelScope.launch {
+            val found = runCatching { source.ensureConversation(taskId) }.getOrDefault(false)
+            if (source !== repo) return@launch
+            if (found) {
+                _ui.update { it.copy(tasks = source.tasks.value) }
+                openTask(taskId)
+            } else {
+                showToast(stringsOf(settings.language).historyUnavailable)
+            }
+        }
     }
 
     /** 详情页追问。 */
@@ -543,12 +571,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 回答云端抛出的 askuser 问题。 */
-    fun answerAsk(answer: String) {
+    fun answerAsk(ask: AskQuestion, picks: Map<String, AskPick>?) {
         val id = _ui.value.activeTaskId ?: return
-        if (answer.isBlank()) return
+        if (_ui.value.busy || _ui.value.activeTask?.ask != ask) return
+        if (picks != null && picks.values.all { it.isEmpty }) return
         _ui.update { it.copy(busy = true) }
         viewModelScope.launch {
-            runCatching { repo.answerAsk(id, answer) }
+            runCatching { repo.answerAsk(id, ask, picks) }
                 .onSuccess { _ui.update { it.copy(busy = false) } }
                 .onFailure { e ->
                     _ui.update { it.copy(busy = false, toast = e.message ?: "应答失败") }

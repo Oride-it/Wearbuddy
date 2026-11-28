@@ -34,7 +34,7 @@ interface TaskRepository {
 
     suspend fun retry(id: String)
 
-    suspend fun answerAsk(id: String, answer: String)
+    suspend fun answerAsk(id: String, ask: AskQuestion, picks: Map<String, AskPick>?)
 
     suspend fun uploadAttachment(name: String, mimeType: String, bytes: ByteArray): Artifact
 
@@ -96,7 +96,7 @@ class OfflineTaskRepository : TaskRepository {
 
     override suspend fun retry(id: String) {}
 
-    override suspend fun answerAsk(id: String, answer: String) {}
+    override suspend fun answerAsk(id: String, ask: AskQuestion, picks: Map<String, AskPick>?) {}
 
     override suspend fun uploadAttachment(
         name: String,

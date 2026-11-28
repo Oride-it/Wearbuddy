@@ -464,16 +464,31 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
     }
 
     /** 回答 askuser 问题：走 ACP 扩展方法。 */
-    fun resolveInterruption(session: Session, question: AskQuestion, answer: String) {
-        val requestId = question.requestId ?: return
-        val link = linkOf(session.conversationId, session)
-        val params = JSONObject()
-            .put("sessionId", link.session.sessionId)
-            .put("requestId", requestId)
-            .put("toolCallId", requestId)
-            .put("optionId", answer)
-            .put("answer", answer)
-        link.rpc(ACP_RESOLVE_INTERRUPTION, params)
+    internal fun resolveInterruption(session: Session, question: AskQuestion, picks: Map<String, AskPick>?) {
+        val link = if (question.rpcId != null) {
+            links[session.conversationId]?.takeIf { it.alive && it.snapshot().ask == question }
+                ?: throw IOException("提问连接已断开，请等待会话重新同步")
+        } else linkOf(session.conversationId, session)
+        val answerPosition = link.snapshot().messages.size
+        val answer = picks?.let(question::answerText).orEmpty()
+        val requestId = question.requestId
+        when {
+            question.rpcId != null -> link.replyToServer(question.rpcId, "result", question.rpcOutcome(picks))
+            picks == null -> cancelTurn(session)
+            requestId == null -> {
+                sendPrompt(session, answer)
+                return
+            }
+            else -> link.rpc(
+                ACP_RESOLVE_INTERRUPTION,
+                JSONObject()
+                    .put("sessionId", link.session.sessionId)
+                    .put("toolCallId", requestId)
+                    .put("decision", "allow")
+                    .put("answers", question.answers(picks))
+            )
+        }
+        link.recordAskAnswer(question, answer, answerPosition)
     }
 
     // ---------- 积分用量 ----------
@@ -901,8 +916,49 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
                 if (request.method == ACP_LOAD && !root.has("error")) replaying = false
                 publish()
                 request.done.countDown()
+            } else if (root.has("id")) {
+                acceptServerRequest(root)
             } else if (events.accept(root, replaying)) publish()
             lastUsedAt = System.currentTimeMillis()
+        }
+
+        private fun acceptServerRequest(root: JSONObject) {
+            val rpcId = root.opt("id") ?: return
+            if (rpcId !is String && rpcId !is Number) return
+            val method = root.optString("method")
+            val permission = method == "session/request_permission" || method == "session/requestPermission"
+            val params = root.optJSONObject("params")
+            val target = params?.optString("sessionId").orEmpty()
+            if (target.isNotBlank() && target != session.sessionId && target != session.conversationId) return
+            val question = if (permission || method == ACP_QUESTION) {
+                params?.let { parseAsk(it, rpcId, permission) }
+            } else null
+            if (question != null) {
+                if (events.showAsk(question)) publish()
+                return
+            }
+            // A response may arrive on the same SSE stream, so never POST from its reader.
+            serverReplyExecutor.execute {
+                runCatching {
+                    replyToServer(rpcId, "error", JSONObject()
+                        .put("code", if (permission || method == ACP_QUESTION) -32602 else -32601)
+                        .put("message", if (permission || method == ACP_QUESTION) "Invalid params" else "Method not found"))
+                }
+            }
+        }
+
+        internal fun replyToServer(id: Any, field: String, payload: JSONObject) {
+            if (!alive) throw IOException("ACP 连接已关闭")
+            postPayload(
+                url, bearer, connectionId, sessionToken,
+                JSONObject().put("jsonrpc", "2.0").put("id", id).put(field, payload),
+                READ_TIMEOUT, "server response", ::receive
+            )
+        }
+
+        internal fun recordAskAnswer(question: AskQuestion, answer: String, messageIndex: Int) {
+            events.resolveAsk(question, answer, messageIndex)
+            publish()
         }
 
         internal fun initialize(session: Session) {
@@ -962,6 +1018,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
     }
 
     private val links = java.util.concurrent.ConcurrentHashMap<String, AcpLink>()
+    private val serverReplyExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     @Volatile private var linksClosed = false
 
     @Synchronized private fun linkOf(id: String, initial: Session? = null): AcpLink {
@@ -992,6 +1049,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
         linksClosed = true
         links.values.forEach { it.close() }
         links.clear()
+        serverReplyExecutor.shutdown()
     }
 
     fun trimLinks(maxIdleMs: Long) {
@@ -1060,7 +1118,19 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
             .put("method", method)
             .put("params", params)
         requestId?.let { payload.put("id", it) }
+        postPayload(url, token, connectionId, acpSessionToken, payload, readTimeout, method, receive)
+    }
 
+    private fun postPayload(
+        url: String,
+        token: String,
+        connectionId: String,
+        acpSessionToken: String,
+        payload: JSONObject,
+        readTimeout: Int,
+        method: String,
+        receive: (String) -> Unit
+    ) {
         val post = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = CONNECT_TIMEOUT
@@ -1144,27 +1214,12 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
             .toList()
 
     private fun askOf(o: JSONObject, status: String): AskQuestion? {
-        val first = findQuestions(o)?.optJSONObject(0)
-        if (first != null) {
-            val question = first.optString("question").ifBlank { first.optString("title") }
-            if (question.isNotBlank()) {
-                val options = first.optJSONArray("options")?.let { arr ->
-                    (0 until arr.length()).mapNotNull { i ->
-                        val opt = arr.optJSONObject(i) ?: return@mapNotNull null
-                        val label = opt.optString("label").ifBlank { opt.optString("value") }
-                        if (label.isBlank()) null
-                        else AskOption(label, opt.optString("description").takeIf { it.isNotBlank() })
-                    }
-                }.orEmpty()
-                return AskQuestion(
-                    question = question,
-                    header = first.optString("header").takeIf { it.isNotBlank() },
-                    options = options,
-                    requestId = findInterruptionId(o)
-                )
+        findQuestions(o)?.let { questions ->
+            parseAsk(JSONObject().put("questions", questions))?.let { ask ->
+                return ask.copy(requestId = findInterruptionId(o))
             }
         }
-        return if (status in WAITING_STATES) AskQuestion("云端需要你补充信息后继续") else null
+        return if (status in WAITING_STATES) AskQuestion(listOf(AskItem("q-0", ""))) else null
     }
 
     private fun findQuestions(node: Any?): JSONArray? = when (node) {
@@ -1176,9 +1231,7 @@ class WorkBuddyCloudClient(private val settings: CloudSettings) {
 
     private fun findInterruptionId(node: Any?): String? = when (node) {
         is JSONObject -> {
-            val direct = node.optString("interruptionId").ifBlank { node.optString("requestId") }
-            if (direct.isNotBlank()) direct
-            else node.keys().asSequence().mapNotNull { findInterruptionId(node.opt(it)) }.firstOrNull()
+            node.askId() ?: node.keys().asSequence().mapNotNull { findInterruptionId(node.opt(it)) }.firstOrNull()
         }
         is JSONArray -> (0 until node.length()).asSequence().mapNotNull { findInterruptionId(node.opt(it)) }.firstOrNull()
         else -> null

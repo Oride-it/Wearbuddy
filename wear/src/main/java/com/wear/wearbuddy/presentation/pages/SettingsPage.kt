@@ -1,5 +1,8 @@
 package com.wear.wearbuddy.presentation.pages
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +29,7 @@ import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Memory
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.School
@@ -43,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,6 +75,7 @@ import com.wear.wearbuddy.data.CloudSettings
 import com.wear.wearbuddy.presentation.LocalStrings
 import com.wear.wearbuddy.presentation.SectionCard
 import com.wear.wearbuddy.presentation.SettingRow
+import com.wear.wearbuddy.presentation.TaskNotifications
 import com.wear.wearbuddy.presentation.formatPoints
 import com.wear.wearbuddy.presentation.maskPhone
 import com.wear.wearbuddy.presentation.rememberClickHaptic
@@ -94,6 +100,9 @@ internal fun SettingsContent(state: UiState, actions: AppViewModel, modifier: Mo
     val s = LocalStrings.current
     val listState = rememberTransformingLazyColumnState()
     val haptic = rememberClickHaptic()
+    val context = LocalContext.current
+    val notifications = remember(context) { TaskNotifications(context) }
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     var dialog by remember { mutableStateOf<String?>(null) }
 
     ScreenScaffold(scrollState = listState, modifier = modifier, contentPadding = PaddingValues(0.dp)) { padding ->
@@ -167,6 +176,15 @@ internal fun SettingsContent(state: UiState, actions: AppViewModel, modifier: Mo
                 item { SettingRow(s.language, { dialog = "language" }, icon = Icons.Rounded.Language,
                     value = if (state.language == CloudSettings.LANG_EN) s.langEn else s.langZh) }
                 item { SettingRow(s.fontSize, { dialog = "font" }, icon = Icons.Rounded.FontDownload, value = fontName(state.fontScale)) }
+                item {
+                    SettingRow(s.taskCompleteNotifications, {
+                        notifications.createChannel(state.language)
+                        if (notifications.shouldRequestPermission()) {
+                            notifications.markRequested()
+                            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else notifications.openSettings()
+                    }, icon = Icons.Rounded.Notifications)
+                }
                 item {
                     SwitchButton(
                         checked = state.ttsEnabled,
